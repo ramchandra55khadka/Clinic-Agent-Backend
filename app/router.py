@@ -4,6 +4,7 @@ from typing import List
 
 from app.database import crud
 from app.schemas import AppointmentCreate,AppointmentOut,DoctorScheduleCreate,DoctorScheduleOut
+from app.services.availability import check_availability
 from app.database.database import get_db
 
 router=APIRouter()
@@ -49,7 +50,7 @@ def delete_schedule(doctor_id: int, db: Session = Depends(get_db)):
 
 @router.post("/appointments/", response_model=AppointmentOut)
 def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get_db)):
-    available = crud.check_availability(
+    available = check_availability(
         db, appointment.doctor_id, appointment.date, appointment.time
     )
     if not available:
