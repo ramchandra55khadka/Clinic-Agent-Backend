@@ -1,0 +1,35 @@
+# Python & UV
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# UV cache & lock (optional: remove if you want to commit uv.lock)
+.uv_cache/
+.uv/
+
+# Environment
+.env
+
+# Project data (never commit real PDFs or vector DB)
+!data/.gitkeep    # remove this line if you don't use .gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Logs & temp
+*.log
+tmp/
+temp/
+
+# Jupyter
+.ipynb_checkpoints
+
+# FastAPI / Uvicorn
+*.sqlite3
+*.db
+instance/
