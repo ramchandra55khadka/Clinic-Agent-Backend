@@ -1,21 +1,13 @@
-from typing import Optional, Dict, Any, List
-from loguru import logger
 from datetime import datetime
+from typing import Any
 
+from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate
+from loguru import logger
+
+from app.database.crud import create_appointment, get_appointments_by_doctor, get_doctor_schedule
+from app.database.database import get_db
 from app.llm_client import LLMClient
 from app.services.availability import check_availability
-from app.database.crud import (
-    get_doctor_schedule,
-    get_appointments_by_doctor,
-    create_appointment
-)
-from app.database.database import get_db
-
-from langchain_core.prompts import (
-    ChatPromptTemplate,
-    SystemMessagePromptTemplate,
-    HumanMessagePromptTemplate
-)
 
 
 class AppointmentAgent:
@@ -67,7 +59,7 @@ class AppointmentAgent:
         ])
 
     # -----------------------------------------------------------------
-    def _messages_to_dicts(self, messages) -> List[Dict[str, str]]:
+    def _messages_to_dicts(self, messages) -> list[dict[str, str]]:
         """Convert LangChain messages → Gemini-safe dicts"""
         output = []
         for msg in messages:
@@ -79,11 +71,11 @@ class AppointmentAgent:
     def build_context(
         self,
         db,
-        doctor_id: Optional[int] = None,
-        date: Optional[str] = None
+        doctor_id: int | None = None,
+        date: str | None = None
     ):
         """Prepare context with doctor schedule + appointments"""
-        context: Dict[str, Any] = {}
+        context: dict[str, Any] = {}
 
         if doctor_id is not None:
             schedule = get_doctor_schedule(db, doctor_id)
@@ -125,9 +117,9 @@ class AppointmentAgent:
     def answer(
         self,
         query: str,
-        doctor_id: Optional[int] = None,
-        appointment_date: Optional[str] = None
-    ) -> Dict[str, Any]:
+        doctor_id: int | None = None,
+        appointment_date: str | None = None
+    ) -> dict[str, Any]:
         """LLM conversational response"""
         db = next(get_db())
         context = self.build_context(db, doctor_id, appointment_date)
@@ -169,8 +161,8 @@ class AppointmentAgent:
     def try_booking(
         self,
         doctor_id: int,
-        patient_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        patient_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Attempt to book an appointment.
         patient_data must contain:

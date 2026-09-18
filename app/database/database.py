@@ -1,34 +1,50 @@
+"""Database engine, session factory and declarative base.
+
+Pooling is tuned for a real Postgres deployment: ``pool_pre_ping`` discards
+connections dropped by the server, ``pool_recycle`` avoids reusing connections a
+proxy has already closed, and the pool is bounded so a traffic spike cannot
+exhaust database connections. SQLite (tests) keeps its single-thread flag.
+"""
+
+from typing import Any
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-from app.config import DATABASE_URL
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Create a database engine instance
-# The engine is the starting point for any SQLAlchemy application
-# It manages connection pooling and serves as the source of database connectivity
-engine=create_engine(DATABASE_URL)
+from app.config import settings
 
-# Create a SessionLocal class for database sessions
-# sessionmaker is a factory for creating Session classes
-# autocommit=False: Don't automatically commit after each operation
-# autoflush=False: Don't automatically flush changes to the database
-# bind=engine: Connect this session maker to our database engine
-SessionLocal=sessionmaker(autocommit=False, autoflush=False, bind=engine)
+DATABASE_URL = settings.database_url
 
-# Create a base class for declarative class definitions
-# This will be used as the base class for all ORM model classes
-Base=declarative_base()
+_IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+_engine_options: dict[str, Any] = {"pool_pre_ping": True, "echo": False}
+if _IS_SQLITE:
+    _engine_options["connect_args"] = {"check_same_thread": False}
+else:
+    _engine_options.update(
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_recycle=settings.db_pool_recycle_seconds,
+        pool_timeout=settings.db_pool_timeout_seconds,
+    )
+
+engine = create_engine(DATABASE_URL, **_engine_options)
+
+# Session factory: no autocommit/autoflush so transactions stay explicit.
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
 
 
-# Dependency function to get a database session
-# This pattern is commonly used in web frameworks like FastAPI
 def get_db():
-    # Create a new database session
+    """FastAPI dependency yielding a session and always closing it."""
     db = SessionLocal()
     try:
-        # Yield the session to the caller (dependency injection)
-        # The session remains open while the caller uses it
         yield db
     finally:
-        # Always close the session when done, even if an exception occurs
-        # This ensures proper cleanup and return of connection to the pool
         db.close()
+
+
+def init_db() -> None:
+    """Creates missing tables. Development convenience only — use Alembic in production."""
+    Base.metadata.create_all(bind=engine)

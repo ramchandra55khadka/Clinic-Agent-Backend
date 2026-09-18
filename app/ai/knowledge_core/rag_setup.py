@@ -1,8 +1,11 @@
 import os
+
 from loguru import logger
-from .loader import PDFLoader
+
 from .embeddings import EmbeddingsStore
+from .loader import PDFLoader
 from .retriever import Retriever
+
 
 class RAGPipeline:
     """
@@ -58,4 +61,4 @@ class RAGPipeline:
 
         except Exception as e:
             logger.error(f"RAG setup failed: {e}")
-            raise RuntimeError(f"RAG setup failed: {e}")
+            raise RuntimeError(f"RAG setup failed: {e}") from e

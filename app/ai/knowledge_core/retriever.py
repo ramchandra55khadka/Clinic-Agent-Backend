@@ -1,7 +1,10 @@
 from pathlib import Path
-from loguru import logger
+
 from langchain_core.documents import Document
+from loguru import logger
+
 from .embeddings import EmbeddingsStore
+
 
 class Retriever:
     """Sementic retriever. auto loads existing FAISS index on init -never crashes."""

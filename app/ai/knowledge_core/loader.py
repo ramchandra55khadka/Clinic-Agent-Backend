@@ -1,10 +1,13 @@
+import gc
 import os
-from typing import List
+
+import fitz  #PyMuPDF
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from loguru import logger
-import fitz #PyMuPDF
-from app.config import CHUNK_SIZE,CHUNK_OVERLAP
+
+from app.config import CHUNK_OVERLAP, CHUNK_SIZE
+
 
 class PDFLoader:
     """
@@ -33,7 +36,7 @@ class PDFLoader:
 
         logger.debug(f"PDFLoader initialized: {self.pdf_dir}, stream={self.stream_mode}")
 
-    def load_documents(self) -> List[Document]:
+    def load_documents(self) -> list[Document]:
         if not os.path.isdir(self.pdf_dir):
             raise FileNotFoundError(f"Directory missing: {self.pdf_dir}")
 
@@ -45,7 +48,7 @@ class PDFLoader:
 
         for file_name in pdf_files:
             file_path = os.path.join(self.pdf_dir, file_name)
-            pages: List[Document] = []
+            pages: list[Document] = []
 
             try:
                 if not self.stream_mode:
@@ -68,7 +71,7 @@ class PDFLoader:
                             if text.strip():
                                 pages.append(Document(page_content=text, metadata={"source": file_name, "page": i}))
                         # free memory per batch
-                        import gc; gc.collect()
+                        gc.collect()
                     doc.close()
 
                 if not pages:
@@ -92,7 +95,7 @@ class PDFLoader:
 
                 # free memory
                 del pages, chunks
-                import gc; gc.collect()
+                gc.collect()
 
             except Exception as e:
                 logger.error(f"Error reading {file_name}: {e}")

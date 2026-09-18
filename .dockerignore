@@ -1,0 +1,27 @@
+# Build context hygiene: keep secrets, local state and caches out of the image.
+.venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+.env
+.env.*
+!.env.example
+
+# Local databases and logs
+*.db
+*.sqlite3
+*.log
+
+# Git / editor / CI
+.git
+.gitignore
+.github
+.idea
+.vscode
+
+# Local tooling
+tests

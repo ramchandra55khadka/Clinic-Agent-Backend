@@ -1,12 +1,13 @@
-from typing import Optional,List,Dict,Any
-from loguru import logger
-
-from app.ai.knowledge_core.retriever import Retriever
-from app.ai.knowledge_core.rag_setup import RAGPipeline
-from app.llm_client import LLMClient
+from typing import Any
 
 from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate,SystemMessagePromptTemplate,HumanMessagePromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate
+from loguru import logger
+
+from app.ai.knowledge_core.rag_setup import RAGPipeline
+from app.ai.knowledge_core.retrieval.retriever import Retriever
+from app.llm_client import LLMClient
+
 
 class RAGAgent:
     """
@@ -27,8 +28,8 @@ class RAGAgent:
         self.persist_dir = persist_dir
         self.top_k = top_k
 
-        self.pipeline: Optional[RAGPipeline] = None
-        self.retriever: Optional[Retriever] = None
+        self.pipeline: RAGPipeline | None = None
+        self.retriever: Retriever | None = None
         self._initialized = False
 
         self.llm = LLMClient(model=llm_model, temperature=temperature)
@@ -146,7 +147,7 @@ class RAGAgent:
         logger.info("RAG pipeline and retriever ready (loaded once).")
 
     # --------------------------------------------------------------------
-    def _format_context(self, docs: List[Document]) -> str:
+    def _format_context(self, docs: list[Document]) -> str:
         """Format FAISS documents for the LLM context."""
         parts = []
         for doc in docs:
@@ -159,7 +160,7 @@ class RAGAgent:
         return "\n".join(parts)
 
     # --------------------------------------------------------------------
-    def _messages_to_dicts(self, messages) -> List[Dict[str, str]]:
+    def _messages_to_dicts(self, messages) -> list[dict[str, str]]:
         """
         Convert SystemMessage / HumanMessage objects to dicts for Gemini.
         """
@@ -173,9 +174,9 @@ class RAGAgent:
     def answer(
         self,
         query: str,
-        top_k: Optional[int] = None,
-        system_prompt: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        top_k: int | None = None,
+        system_prompt: str | None = None,
+    ) -> dict[str, Any]:
         self._ensure_initialized()
         top_k = top_k or self.top_k
         logger.info(f"Processing query: {query}")

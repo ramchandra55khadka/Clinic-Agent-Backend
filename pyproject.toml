@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.20.0",
     "faiss-cpu>=1.13.1",
     "fastapi>=0.123.9",
     "fastembed>=0.7.3",
@@ -16,7 +17,34 @@ dependencies = [
     "loguru>=0.7.3",
     "psycopg2-binary>=2.9.11",
     "pydantic[email]>=2.12.5",
+    "pyjwt>=2.14.0",
     "pymupdf>=1.26.6",
     "python-dotenv>=1.2.1",
     "uvicorn>=0.38.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# E501: some legacy lines exceed the limit. B008: FastAPI's Depends() in defaults is idiomatic.
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Package __init__ files re-export names for other modules; those imports look unused.
+"__init__.py" = ["F401"]

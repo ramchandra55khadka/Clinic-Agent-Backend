@@ -1,9 +1,11 @@
 import os
-from loguru import logger
 from pathlib import Path
-from langchain_community.embeddings import FastEmbedEmbeddings  
+
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+from loguru import logger
+
 
 class EmbeddingsStore:
     """
