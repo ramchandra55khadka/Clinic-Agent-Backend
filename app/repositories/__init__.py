@@ -32,8 +32,10 @@ from app.repositories.refresh_token import (
 from app.repositories.user import (
     count_active_admins,
     create_user_account,
+    create_user_profile,
     delete_user_account,
     get_all_users,
+    get_profile_by_user_id,
     get_user_by_email,
     get_user_by_id,
     is_locked,
@@ -43,6 +45,7 @@ from app.repositories.user import (
     set_user_role,
     update_password_hash,
     update_user_profile,
+    user_out,
 )
 
 __all__ = [
@@ -51,6 +54,7 @@ __all__ = [
     "create_doctor_schedule",
     "create_refresh_token",
     "create_user_account",
+    "create_user_profile",
     "delete_doctor_schedule",
     "delete_user_account",
     "ensure_patient_for_user",
@@ -62,6 +66,7 @@ __all__ = [
     "get_doctor",
     "get_doctor_schedule",
     "get_patient_by_email",
+    "get_profile_by_user_id",
     "get_refresh_token",
     "get_user_by_email",
     "get_user_by_id",
@@ -78,4 +83,5 @@ __all__ = [
     "update_doctor_schedule",
     "update_password_hash",
     "update_user_profile",
+    "user_out",
 ]

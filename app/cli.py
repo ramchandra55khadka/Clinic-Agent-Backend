@@ -15,6 +15,7 @@ from app.core.roles import ADMIN, ROLE_LABELS, ROLES
 from app.db.session import SessionLocal
 from app.models.user_profile import split_display_name
 from app.schemas.user_auth import UserRegister
+from app.schemas.user_profile import UserProfileCreate
 from app.services.auth import hash_password
 
 
@@ -50,7 +51,7 @@ def bootstrap_admin() -> int:
         return 1
 
     try:
-        payload = UserRegister(first_name=first_name, last_name=last_name, email=email, password=password, phone=phone)
+        payload = UserRegister(email=email, password=password)
     except ValidationError as exc:
         print(f"Invalid bootstrap admin configuration: {_validation_error_message(exc)}", file=sys.stderr)
         return 1
@@ -67,6 +68,11 @@ def bootstrap_admin() -> int:
             detail = "existing account promoted to admin; via bootstrap-admin"
         else:
             user = repositories.create_user_account(db, payload, hash_password(password), role=ADMIN)
+            repositories.create_user_profile(
+                db,
+                user,
+                UserProfileCreate(first_name=first_name, last_name=last_name, phone=phone),
+            )
             detail = "role=admin; via bootstrap-admin"
 
         repositories.log_audit(
@@ -114,8 +120,13 @@ def create_user(email: str, password: str, full_name: str, phone: str | None, ro
             print(f"{email} already exists; use set-role instead", file=sys.stderr)
             return 1
 
-        payload = UserRegister(first_name=first_name, last_name=last_name, email=email, password=password, phone=phone)
+        payload = UserRegister(email=email, password=password)
         user = repositories.create_user_account(db, payload, hash_password(password), role=role)
+        repositories.create_user_profile(
+            db,
+            user,
+            UserProfileCreate(first_name=first_name, last_name=last_name, phone=phone),
+        )
         repositories.log_audit(
             db,
             action="user.created",

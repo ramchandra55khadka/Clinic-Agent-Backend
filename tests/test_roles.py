@@ -413,7 +413,7 @@ def test_bootstrap_admin_is_idempotent_when_admin_exists(monkeypatch):
 
             repositories.create_user_account(
                 db,
-                UserRegister(first_name="First", last_name="Admin", email=first_email, password="Sup3rAdmin123"),
+                UserRegister(email=first_email, password="Sup3rAdmin123"),
                 hash_password("Sup3rAdmin123"),
                 role=ADMIN,
             )

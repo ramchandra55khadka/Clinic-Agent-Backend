@@ -97,12 +97,15 @@ def delete_doctor_schedule(db: Session, doctor_id: int):
 
     doctor = db_schedule.doctor
     profile = doctor.profile if doctor else None
-    if profile is not None:
-        # Deleting the profile cascades to the doctor and its schedule(s).
-        db.delete(profile)
-    elif doctor is not None:  # pragma: no cover - defensive
+
+    if doctor is not None:
+        # Deleting the doctor cascades to its schedules and educations.
         db.delete(doctor)
-    else:  # pragma: no cover - defensive
+    if profile is not None:
+        # ``UserProfile`` no longer back-references the doctor, so it is removed
+        # explicitly rather than through a reverse-relationship cascade.
+        db.delete(profile)
+    if doctor is None and profile is None:  # pragma: no cover - defensive
         db.delete(db_schedule)
 
     db.commit()

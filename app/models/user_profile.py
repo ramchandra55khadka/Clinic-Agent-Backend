@@ -4,14 +4,18 @@ A profile belongs to at most one login account (``user_id`` is unique) but may
 also stand alone — for example a doctor record entered by clinic staff who does
 not sign in.
 
+``email`` is a **copy** of the owning account's address, kept so a profile can be
+resolved without traversing an ORM relationship; ``user_account`` remains the
+source of truth for credentials. Standalone profiles (doctors) have no account,
+so ``email`` is nullable.
+
 Personal names are stored split into ``first_name``/``last_name``. Callers that
 think in a single display string (doctor schedules, the MCP tool layer) can keep
 using :attr:`UserProfile.full_name`, which composes the columns on read and
 splits them on write — see :func:`split_display_name`.
 """
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, func
 
 from app.db.base import Base
 
@@ -49,26 +53,30 @@ class UserProfile(Base):
         index=True,
     )
     first_name = Column(String, nullable=False, server_default="")
+    #: Optional: migration ``0013_split_profile_name`` adds it nullable, the API
+    #: schema defaults it to ``None``, and ``POST /api/profiles`` may omit it.
     last_name = Column(String, nullable=True)
+    #: Copy of the owning ``user_account.email``; ``NULL`` for standalone
+    #: profiles (clinic-entered doctors never sign in).
+    email = Column(String, nullable=True, index=True)
     phone = Column(String, nullable=True)
+    date_of_birth = Column(Date, nullable=True)
+    #: One of ``Male`` / ``Female`` / ``Other`` (see
+    #: :data:`app.schemas.user_profile.GENDER_OPTIONS`), or ``NULL`` when the
+    #: person has not said. Stored as free text so a future option needs no
+    #: migration; the API schema is what enforces the three values.
+    gender = Column(String, nullable=True)
+    address = Column(Text, nullable=True)
     photo_url = Column(Text, nullable=True)
     memory_enabled = Column(Boolean, nullable=False, default=True, server_default="1")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    account = relationship("UserAccount", back_populates="profile")
-    doctor = relationship(
-        "Doctor",
-        back_populates="profile",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-    patient = relationship(
-        "Patient",
-        back_populates="profile",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
+    # NOTE: the ``doctor`` / ``patient`` rows that reference this profile are
+    # deliberately **not** exposed as reverse relationships here. The ownership
+    # arrow only ever runs doctor/patient -> profile (``profile_id``), so callers
+    # read the role rows with an explicit query keyed on ``profile_id`` rather
+    # than walking a back-reference off the profile.
 
     # ------------------------------------------------------------------ #
     # Display-name convenience: keeps single-string call sites (doctor_name,

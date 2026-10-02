@@ -1,4 +1,9 @@
-"""Patient-specific attributes, linked 1:1 to a :class:`UserProfile`."""
+"""Patient-specific attributes, linked 1:1 to a :class:`UserProfile`.
+
+The link is a one-way FK (``patient.profile_id``); ``UserProfile`` exposes no
+reverse ``patient`` relationship, so look a patient row up by ``profile_id``
+rather than off the profile.
+"""
 
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import relationship
@@ -23,7 +28,7 @@ class Patient(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    profile = relationship("UserProfile", back_populates="patient")
+    profile = relationship("UserProfile")
     appointments = relationship(
         "Appointment",
         back_populates="patient",

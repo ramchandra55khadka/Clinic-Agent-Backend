@@ -25,7 +25,7 @@ router = APIRouter(tags=["doctor-info"])
 def _extract_memories_background(user_id: str, session_id: str, message: str) -> None:
     with SessionLocal() as db:
         user = db.get(UserAccount, user_id)
-        if user is None or not memory_service.memory_enabled(user):
+        if user is None or not memory_service.memory_enabled(db, user):
             return
         conversation = memory_service.get_conversation(db, session_id=session_id, user_id=user_id)
         if conversation is None:
@@ -56,7 +56,7 @@ async def chat(
     try:
         memories = (
             memory_service.retrieve_memories(db, user_id=current_user.id, query=request.message)
-            if memory_service.memory_enabled(current_user)
+            if memory_service.memory_enabled(db, current_user)
             else []
         )
         session_id = request.session_id or str(uuid4())

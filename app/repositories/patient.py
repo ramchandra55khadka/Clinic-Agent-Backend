@@ -22,18 +22,24 @@ def get_patient_by_email(db: Session, email: str):
 
 
 def ensure_patient_for_user(db: Session, user: UserAccount) -> Patient:
-    """Returns the account's ``patient`` row, creating it (and a profile) when missing."""
-    profile = user.profile
+    """Returns the account's ``patient`` row, creating it (and a profile) when missing.
+
+    The profile is looked up by ``user_id`` and the patient row by ``profile_id``
+    rather than through ORM relationships: account, profile and role rows are
+    created and read separately (see ``app.models.user_account``), and
+    ``UserProfile`` exposes no reverse ``patient`` attribute.
+    """
+    profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
     if profile is None:
-        profile = UserProfile(user_id=user.id, first_name=user.first_name or user.email, last_name=user.last_name)
+        profile = UserProfile(user_id=user.id, email=user.email, first_name=user.email)
         db.add(profile)
         db.flush()
 
-    if profile.patient is None:
+    patient = db.query(Patient).filter(Patient.profile_id == profile.id).first()
+    if patient is None:
         patient = Patient(profile_id=profile.id)
         db.add(patient)
         db.commit()
         db.refresh(patient)
-        return patient
 
-    return profile.patient
+    return patient

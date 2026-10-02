@@ -285,3 +285,110 @@ def test_memory_is_user_scoped(client, make_user, monkeypatch):
     response = client.get("/api/memories/", headers=second["headers"])
     assert response.status_code == 200
     assert response.json()["memories"] == []
+
+
+def test_patching_a_memory_distinguishes_missing_from_rejected(client, make_user):
+    """404 means "no such memory"; 422 means "the new value is not allowed".
+
+    Both come back from the service as ``None``, so the route has to tell them
+    apart — otherwise a rejected edit looks like a deleted row in the profile UI.
+    """
+    user = make_user()
+
+    with SessionLocal() as db:
+        memory = memory_service.upsert_memory(db, user_id=user["user"]["id"], key="preferred_time", value="Morning appointments")
+        assert memory is not None
+        memory_id = memory.id
+
+    missing = client.patch("/api/memories/does-not-exist", headers=user["headers"], json={"value": "Evening appointments"})
+    assert missing.status_code == 404, missing.text
+
+    rejected = client.patch(
+        f"/api/memories/{memory_id}",
+        headers=user["headers"],
+        json={"value": "Allergic to penicillin"},
+    )
+    assert rejected.status_code == 422, rejected.text
+
+    with SessionLocal() as db:
+        unchanged = memory_service.get_memory(db, user_id=user["user"]["id"], memory_id=memory_id)
+        assert unchanged is not None
+        assert unchanged.value == "Morning appointments"
+
+    accepted = client.patch(f"/api/memories/{memory_id}", headers=user["headers"], json={"value": "Evening appointments"})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["value"] == "Evening appointments"
+
+
+def test_user_can_create_a_personalization(client, make_user):
+    """``PUT /memories/{key}`` adds a slot by hand, then replaces it — never duplicates it."""
+    user = make_user()
+
+    created = client.put(
+        "/api/memories/language",
+        headers=user["headers"],
+        json={"key": "language", "value": "Nepali"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["key"] == "language"
+    assert created.json()["value"] == "Nepali"
+    assert created.json()["kind"] == "preference"
+
+    listed = client.get("/api/memories/", headers=user["headers"])
+    assert [m["key"] for m in listed.json()["memories"]] == ["language"]
+
+    # The slot is unique per user, so saving it again overwrites instead of stacking.
+    replaced = client.put(
+        "/api/memories/language",
+        headers=user["headers"],
+        json={"key": "language", "value": "Hindi"},
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["value"] == "Hindi"
+
+    listed = client.get("/api/memories/", headers=user["headers"]).json()["memories"]
+    assert len(listed) == 1
+    assert listed[0]["value"] == "Hindi"
+
+
+def test_creating_a_personalization_rejects_bad_keys_and_values(client, make_user):
+    """Unknown slot, mismatched path, or a policy-rejected value is a 422 — and writes nothing.
+
+    None of these should ever surface as 404: the row never existed, so "not
+    found" would send the profile UI hunting for a memory that was never there.
+    """
+    user = make_user()
+    headers = user["headers"]
+
+    unknown_key = client.put(
+        "/api/memories/favourite_colour",
+        headers=headers,
+        json={"key": "favourite_colour", "value": "Blue"},
+    )
+    assert unknown_key.status_code == 422, unknown_key.text
+
+    mismatched = client.put(
+        "/api/memories/language",
+        headers=headers,
+        json={"key": "preferred_time", "value": "Morning appointments"},
+    )
+    assert mismatched.status_code == 422, mismatched.text
+
+    blank = client.put("/api/memories/language", headers=headers, json={"key": "language", "value": "   "})
+    assert blank.status_code == 422, blank.text
+
+    medical = client.put(
+        "/api/memories/preferred_doctor",
+        headers=headers,
+        json={"key": "preferred_doctor", "value": "Allergic to penicillin"},
+    )
+    assert medical.status_code == 422, medical.text
+
+    listed = client.get("/api/memories/", headers=headers)
+    assert listed.json()["memories"] == []
+
+
+def test_creating_a_personalization_requires_authentication(client):
+    response = client.put("/api/memories/language", json={"key": "language", "value": "Nepali"})
+    assert response.status_code == 401
+

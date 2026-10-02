@@ -63,22 +63,35 @@ def make_user(client):
         email = f"{role}-{uuid4().hex[:10]}@example.com"
         response = client.post(
             "/api/auth/register",
-            json={"first_name": "Test", "last_name": "User", "email": email, "password": password},
+            json={"email": email, "password": password},
         )
         assert response.status_code == 201, response.text
+        body = response.json()
+        headers = {"Authorization": f"Bearer {body['access_token']}"}
 
         if role != "patient":
             with SessionLocal() as db:
                 user = repositories.get_user_by_email(db, email)
                 repositories.set_user_role(db, user, role)
 
-        body = response.json()
+        # Personal details are a separate call: the profile is decoupled from the
+        # account (creating it also gives a patient account its ``patient`` row).
+        profile = client.post(
+            "/api/profiles",
+            headers=headers,
+            json={"first_name": "Test", "last_name": "User"},
+        )
+        assert profile.status_code == 201, profile.text
+
+        me = client.get("/api/auth/me", headers=headers)
+        assert me.status_code == 200, me.text
+
         return {
             "email": email,
             "password": password,
-            "headers": {"Authorization": f"Bearer {body['access_token']}"},
+            "headers": headers,
             "refresh_token": body["refresh_token"],
-            "user": body["user"],
+            "user": me.json(),
         }
 
     return _make

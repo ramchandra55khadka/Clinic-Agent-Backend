@@ -33,7 +33,7 @@ from app.schemas.user_auth import (
     UserRegister,
     UserRoleUpdate,
 )
-from app.schemas.user_profile import UserProfileUpdate
+from app.schemas.user_profile import UserProfileCreate, UserProfileUpdate
 from app.services.auth import (
     access_token_expires_in,
     create_access_token,
@@ -77,7 +77,7 @@ def _issue_tokens(db: Session, user: UserAccount, request: Request) -> TokenResp
         access_token=access_token,
         refresh_token=raw_refresh,
         expires_in=access_token_expires_in(),
-        user=user,
+        user=repositories.user_out(db, user),
     )
 
 
@@ -88,6 +88,11 @@ def register_user(
     db: Session = Depends(get_db),
     _rate_limit: None = Depends(register_rate_limit),
 ):
+    """Creates **only** the login account (email + password) and returns tokens.
+
+    Personal details are written by a second call to ``POST /api/profiles`` (see
+    :mod:`app.api.routes.profile`), so account and profile stay decoupled.
+    """
     if repositories.get_user_by_email(db, str(payload.email)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
@@ -196,7 +201,7 @@ def refresh_tokens(payload: RefreshRequest, request: Request, db: Session = Depe
         access_token=create_access_token(str(user.id), {"email": user.email, "role": user.role}),
         refresh_token=raw_refresh,
         expires_in=access_token_expires_in(),
-        user=user,
+        user=repositories.user_out(db, user),
     )
 
 
@@ -263,8 +268,11 @@ def change_password(
 
 
 @router.get("/me", response_model=UserAccountOut)
-def get_me(current_user: UserAccount = Depends(get_current_user)):
-    return current_user
+def get_me(
+    db: Session = Depends(get_db),
+    current_user: UserAccount = Depends(get_current_user),
+):
+    return repositories.user_out(db, current_user)
 
 
 @router.patch("/me", response_model=UserAccountOut)
@@ -284,7 +292,7 @@ def update_me(
         client_ip=client_ip(request),
         user_agent=user_agent(request),
     )
-    return updated
+    return repositories.user_out(db, updated)
 
 
 # --------------------------------------------------------------------------- #
@@ -312,7 +320,7 @@ def list_users(
     _admin: UserAccount = Depends(require_admin),
 ):
     """Every account, optionally filtered by role (newest first)."""
-    return repositories.get_all_users(db, role=role)
+    return [repositories.user_out(db, user) for user in repositories.get_all_users(db, role=role)]
 
 
 @router.post("/users", response_model=UserAccountOut, status_code=status.HTTP_201_CREATED)
@@ -327,6 +335,15 @@ def create_managed_user(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     user = repositories.create_user_account(db, payload, hash_password(payload.password), role=payload.role)
+    repositories.create_user_profile(
+        db,
+        user,
+        UserProfileCreate(
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            phone=payload.phone,
+        ),
+    )
     repositories.log_audit(
         db,
         action="user.created",
@@ -337,7 +354,7 @@ def create_managed_user(
         user_agent=user_agent(request),
         detail=f"role={user.role}",
     )
-    return user
+    return repositories.user_out(db, user)
 
 
 @router.patch("/users/{user_id}/role", response_model=UserAccountOut)
@@ -354,7 +371,7 @@ def update_user_role(
 
     previous = user.role
     if previous == payload.role:
-        return user
+        return repositories.user_out(db, user)
 
     # Never leave the clinic without an active administrator.
     if previous == ADMIN and payload.role != ADMIN and repositories.count_active_admins(db, exclude_user_id=user.id) == 0:
@@ -375,7 +392,7 @@ def update_user_role(
         user_agent=user_agent(request),
         detail=f"{previous} -> {payload.role}; revoked {revoked} session(s)",
     )
-    return user
+    return repositories.user_out(db, user)
 
 
 @router.patch("/users/{user_id}/active", response_model=UserAccountOut)
@@ -419,7 +436,7 @@ def update_user_active(
         user_agent=user_agent(request),
         detail=f"revoked {revoked} session(s)",
     )
-    return user
+    return repositories.user_out(db, user)
 
 @router.delete("/users/{user_id}", response_model=MessageResponse)
 def delete_user(

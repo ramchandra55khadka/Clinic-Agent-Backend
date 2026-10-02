@@ -1,5 +1,6 @@
 """Accounts, credentials and sessions: register, login, password, refresh."""
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -9,11 +10,14 @@ from app.services.auth import password_problems
 
 
 class UserRegister(BaseModel):
-    first_name: str = Field(..., min_length=1, max_length=120)
-    last_name: str | None = Field(default=None, min_length=1, max_length=120)
+    """Account fields only: ``POST /api/auth/register`` creates just the account.
+
+    Personal details (name, phone) are written afterwards by
+    ``POST /api/profiles`` — see :class:`app.schemas.user_profile.UserProfileCreate`.
+    """
+
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
-    phone: str | None = Field(default=None, min_length=7, max_length=30)
 
     @field_validator("password")
     @classmethod
@@ -58,6 +62,9 @@ class UserAccountOut(BaseModel):
     last_name: str | None = None
     email: EmailStr
     phone: str | None = None
+    date_of_birth: date | None = None
+    gender: str | None = None
+    address: str | None = None
     photo_url: str | None = None
     memory_enabled: bool = True
     role: str
@@ -65,14 +72,29 @@ class UserAccountOut(BaseModel):
 
 
 
-class ManagedUserCreate(UserRegister):
-    """Admin-created account: same rules as registration, plus an explicit role.
+class ManagedUserCreate(BaseModel):
+    """Admin-created account: credentials **and** the initial profile.
 
     Only an administrator can reach this endpoint, and only clinic roles can be
-    chosen — public registration is the path for patients.
+    chosen — public registration is the path for patients. Unlike public
+    registration (which splits account and profile across two calls) this is a
+    convenience endpoint: it invokes both creation functions in one request.
     """
 
+    first_name: str = Field(..., min_length=1, max_length=120)
+    last_name: str | None = Field(default=None, min_length=1, max_length=120)
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    phone: str | None = Field(default=None, min_length=7, max_length=30)
     role: Literal["staff", "admin"] = "staff"
+
+    @field_validator("password")
+    @classmethod
+    def password_policy(cls, value: str) -> str:
+        problems = password_problems(value)
+        if problems:
+            raise ValueError("Password " + ", ".join(problems))
+        return value
 
 
 

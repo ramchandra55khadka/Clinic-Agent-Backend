@@ -20,22 +20,20 @@ from sqlalchemy.orm import Session
 
 from app.ai.llm_client import LLMClient
 from app.core.config import settings
+
+#: Re-exported for callers that import it from here; the canonical list lives in
+#: :mod:`app.core.memory_keys` so the API schema and the extractor cannot drift.
+from app.core.memory_keys import ALLOWED_MEMORY_KEYS  # noqa: F401
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.long_term_memory import LongTermMemory
 from app.models.user_account import UserAccount
+from app.models.user_profile import UserProfile
 
 #: How many recent turns stay verbatim in the prompt before being compacted.
 HISTORY_TURNS = 10
 #: Hard cap on the rolling summary, so it can never crowd out the live window.
 SUMMARY_MAX_CHARS = 1200
-ALLOWED_MEMORY_KEYS = {
-    "preferred_doctor",
-    "preferred_specialty",
-    "preferred_time",
-    "language",
-    "contact_preference",
-    "books_for_family",
-}
+#: Medical wording is never stored: memory is for preferences, not health data.
 HEALTH_TERMS = re.compile(
     r"\b("
     r"pain|fever|diagnos|medicin|tablet|allerg|"
@@ -330,8 +328,15 @@ def delete_conversation(db: Session, *, session_id: str, user_id: str) -> bool:
     return True
 
 
-def memory_enabled(user: UserAccount) -> bool:
-    return True if user.profile is None else bool(user.profile.memory_enabled)
+def memory_enabled(db: Session, user: UserAccount) -> bool:
+    """Whether the account has opted into long-term memory.
+
+    The flag lives on the ``user_profile`` row, which is not joined to the
+    account by a relationship, so it is looked up by ``user_id``. Accounts
+    without a profile default to enabled (matching the column default).
+    """
+    profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
+    return True if profile is None else bool(profile.memory_enabled)
 
 
 def _valid_memory(key: str, value: str) -> tuple[str, str] | None:
@@ -467,7 +472,7 @@ def extract_memories_from_message(
     message: str,
     source_conversation_id: str | None = None,
 ) -> list[LongTermMemory]:
-    if not memory_enabled(user):
+    if not memory_enabled(db, user):
         return []
 
     saved: list[LongTermMemory] = []
@@ -506,6 +511,11 @@ def list_memories(db: Session, *, user_id: str) -> list[LongTermMemory]:
 
 def get_memory(db: Session, *, user_id: str, memory_id: str) -> LongTermMemory | None:
     return db.query(LongTermMemory).filter(LongTermMemory.id == memory_id, LongTermMemory.user_id == user_id).first()
+
+
+def get_memory_by_key(db: Session, *, user_id: str, key: str) -> LongTermMemory | None:
+    """Fetch the one row for a preference slot (``uq_memory_user_key``)."""
+    return db.query(LongTermMemory).filter(LongTermMemory.key == key, LongTermMemory.user_id == user_id).first()
 
 
 def update_memory(db: Session, *, user_id: str, memory_id: str, value: str) -> LongTermMemory | None:

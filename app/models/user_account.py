@@ -3,9 +3,14 @@
 ``user_account`` holds everything needed to authenticate and authorize: the
 email, the role, the active flag and the password credential (merged in from the
 old ``user_auth`` table, which was a strict 1:1 and carried no value as a
-separate table). Personal data (name, phone, photo) lives in
-:class:`~app.models.user_profile.UserProfile`. The convenience properties
-below read through to the profile so API schemas can keep a flat shape.
+separate table).
+
+Personal data (first/last name, phone, photo, memory flag) lives in
+:class:`~app.models.user_profile.UserProfile`. The two rows are deliberately
+**not** joined by an ORM relationship: they are created by separate calls
+(account first, then profile) and are read back through explicit queries keyed
+on ``user_profile.user_id`` / the copied ``user_profile.email``. Build the flat
+API shape with :func:`app.repositories.user.user_out`.
 
 ``password_hash`` is nullable on purpose: an account created by an
 administrator or the CLI has no password yet, so it cannot sign in until one is
@@ -18,7 +23,6 @@ same account, so all account-related rows are kept together.
 from uuid import uuid4
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, func
-from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
@@ -43,51 +47,9 @@ class UserAccount(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    profile = relationship(
-        "UserProfile",
-        back_populates="account",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-
-    # ------------------------------------------------------------------ #
-    # Profile pass-throughs — keep the flat API shape (first_name/last_name/
-    # phone/photo_url) so schemas can read a name straight off the account.
-    # ------------------------------------------------------------------ #
-
-    @property
-    def first_name(self) -> str:
-        return self.profile.first_name if self.profile else ""
-
-    @property
-    def last_name(self) -> str | None:
-        return self.profile.last_name if self.profile else None
-
-    @property
-    def full_name(self) -> str:
-        return self.profile.full_name if self.profile else ""
-
-    @property
-    def phone(self) -> str | None:
-        return self.profile.phone if self.profile else None
-
-    @property
-    def photo_url(self) -> str | None:
-        return self.profile.photo_url if self.profile else None
-
-    @property
-    def memory_enabled(self) -> bool:
-        return True if self.profile is None else bool(self.profile.memory_enabled)
-
-    @property
-    def patient(self):
-        """The ``Patient`` row linked through this account's profile, if any."""
-        return self.profile.patient if self.profile else None
-
-    @property
-    def doctor(self):
-        """The ``Doctor`` row linked through this account's profile, if any."""
-        return self.profile.doctor if self.profile else None
+    # The matching ``user_profile`` row is intentionally NOT a relationship:
+    # account and profile are created and read separately (see the module
+    # docstring). Use ``app.repositories.user.get_profile_by_user_id``. 
 
 
 class RefreshToken(Base):

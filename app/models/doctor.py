@@ -1,4 +1,9 @@
-"""Doctor-specific attributes, linked 1:1 to a :class:`UserProfile`."""
+"""Doctor-specific attributes, linked 1:1 to a :class:`UserProfile`.
+
+The link is a one-way FK (``doctor.profile_id``); ``UserProfile`` exposes no
+reverse ``doctor`` relationship, so read a doctor's personal details through
+``doctor.profile`` and never off the profile.
+"""
 
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import relationship
@@ -28,7 +33,7 @@ class Doctor(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    profile = relationship("UserProfile", back_populates="doctor")
+    profile = relationship("UserProfile")
     schedules = relationship(
         "DoctorSchedule",
         back_populates="doctor",
