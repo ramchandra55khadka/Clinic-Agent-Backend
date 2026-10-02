@@ -2,9 +2,9 @@ import os
 
 from loguru import logger
 
-from .embeddings import EmbeddingsStore
-from .loader import PDFLoader
-from .retriever import Retriever
+from app.ai.knowledge_core.embeddings import EmbeddingsStore
+from app.ai.knowledge_core.loader import PDFLoader
+from app.ai.knowledge_core.retrieval.retriever import Retriever
 
 
 class RAGPipeline:

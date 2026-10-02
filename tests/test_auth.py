@@ -5,15 +5,15 @@ from datetime import UTC, datetime, timedelta
 import jwt
 import pytest
 
-from app.config import settings
+from app.core.config import settings
 
 DEFAULT_PASSWORD = "Sup3rSecret1"
 
 
 def _register(client, email="new-user@example.com", password=DEFAULT_PASSWORD):
     return client.post(
-        "/api/v1/auth/register",
-        json={"full_name": "New User", "email": email, "password": password},
+        "/api/auth/register",
+        json={"first_name": "New", "last_name": "User", "email": email, "password": password},
     )
 
 
@@ -41,10 +41,47 @@ def test_register_enforces_password_policy(client, password):
     assert response.status_code == 422
 
 
+
+
+def test_update_me_changes_profile_fields(client, make_user):
+    user = make_user()
+    photo = "data:image/png;base64,iVBORw0KGgo="
+
+    response = client.patch(
+        "/api/auth/me",
+        headers=user["headers"],
+        json={
+            "first_name": "Updated",
+            "last_name": "Patient",
+            "phone": "9866835892",
+            "photo_url": photo,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["first_name"] == "Updated"
+    assert body["last_name"] == "Patient"
+    assert body["phone"] == "9866835892"
+    assert body["photo_url"] == photo
+    assert body["email"] == user["email"]
+    assert body["role"] == "patient"
+
+
+def test_update_me_rejects_unsafe_profile_photo(client, make_user):
+    user = make_user()
+    response = client.patch(
+        "/api/auth/me",
+        headers=user["headers"],
+        json={"photo_url": "javascript:alert(1)"},
+    )
+    assert response.status_code == 422
+
+
 def test_login_succeeds(client, make_user):
     user = make_user()
     response = client.post(
-        "/api/v1/auth/login", json={"email": user["email"], "password": user["password"]}
+        "/api/auth/login", json={"email": user["email"], "password": user["password"]}
     )
     assert response.status_code == 200
     assert response.json()["user"]["email"] == user["email"]
@@ -54,10 +91,10 @@ def test_login_failures_are_indistinguishable(client, make_user):
     user = make_user()
 
     wrong_password = client.post(
-        "/api/v1/auth/login", json={"email": user["email"], "password": "WrongPass123"}
+        "/api/auth/login", json={"email": user["email"], "password": "WrongPass123"}
     )
     unknown_user = client.post(
-        "/api/v1/auth/login", json={"email": "nobody@example.com", "password": "WrongPass123"}
+        "/api/auth/login", json={"email": "nobody@example.com", "password": "WrongPass123"}
     )
 
     assert wrong_password.status_code == unknown_user.status_code == 401
@@ -69,12 +106,12 @@ def test_account_locks_after_repeated_failures(client, make_user):
 
     for _ in range(settings.max_failed_login_attempts):
         attempt = client.post(
-            "/api/v1/auth/login", json={"email": user["email"], "password": "WrongPass123"}
+            "/api/auth/login", json={"email": user["email"], "password": "WrongPass123"}
         )
         assert attempt.status_code == 401
 
     locked = client.post(
-        "/api/v1/auth/login", json={"email": user["email"], "password": user["password"]}
+        "/api/auth/login", json={"email": user["email"], "password": user["password"]}
     )
     assert locked.status_code == 423
     assert "Retry-After" in locked.headers
@@ -83,10 +120,10 @@ def test_account_locks_after_repeated_failures(client, make_user):
 def test_me_requires_a_valid_token(client, make_user):
     user = make_user()
 
-    assert client.get("/api/v1/auth/me").status_code == 401
-    assert client.get("/api/v1/auth/me", headers={"Authorization": "Bearer not-a-token"}).status_code == 401
+    assert client.get("/api/auth/me").status_code == 401
+    assert client.get("/api/auth/me", headers={"Authorization": "Bearer not-a-token"}).status_code == 401
 
-    ok = client.get("/api/v1/auth/me", headers=user["headers"])
+    ok = client.get("/api/auth/me", headers=user["headers"])
     assert ok.status_code == 200
     assert ok.json()["email"] == user["email"]
 
@@ -105,7 +142,7 @@ def test_token_signed_with_another_secret_is_rejected(client):
         "a-different-secret-that-is-long-enough-to-sign",
         algorithm="HS256",
     )
-    response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {forged}"})
+    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {forged}"})
     assert response.status_code == 401
 
 
@@ -123,5 +160,5 @@ def test_expired_token_is_rejected(client):
         settings.jwt_secret_key,
         algorithm="HS256",
     )
-    response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {expired}"})
+    response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {expired}"})
     assert response.status_code == 401

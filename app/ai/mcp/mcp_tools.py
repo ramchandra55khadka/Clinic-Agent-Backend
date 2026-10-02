@@ -8,8 +8,11 @@ from datetime import date as Date
 from datetime import time as Time
 from typing import Any
 
-from app.database.database import SessionLocal
-from app.database.schema import AppointmentCreate
+from app.db.session import SessionLocal
+from app.models.doctor import Doctor
+from app.models.doctor_schedule import DoctorSchedule
+from app.models.user_profile import UserProfile
+from app.schemas.appointment import AppointmentCreate
 from app.services.appointments import BookingError
 from app.services.appointments import book_appointment as book_appointment_record
 from app.services.availability import explain_unavailability, get_available_slots
@@ -45,3 +48,54 @@ def book_appointment(appointment: AppointmentCreate) -> dict[str, Any]:
             "email_status": email_status,
         },
     }
+
+
+def list_doctor_availability(appointment_date: Date) -> list[dict[str, Any]]:
+    """All doctors with their available slots for a date, from the database."""
+    with SessionLocal() as db:
+        schedules = (
+            db.query(DoctorSchedule)
+            .join(Doctor, DoctorSchedule.doctor_id == Doctor.id)
+            .join(UserProfile, Doctor.profile_id == UserProfile.id)
+            .order_by(UserProfile.first_name, UserProfile.last_name)
+            .all()
+        )
+        result: list[dict[str, Any]] = []
+        for schedule in schedules:
+            slots = get_available_slots(db, schedule.doctor_id, appointment_date)
+            available_slots = [slot for slot in slots if slot.get("available")]
+            result.append(
+                {
+                    "doctor_id": schedule.doctor_id,
+                    "doctor_name": schedule.doctor_name,
+                    "specialization": schedule.specialization,
+                    "photo_url": schedule.photo_url,
+                    "date": str(appointment_date),
+                    "available": bool(available_slots),
+                    "available_slots": available_slots,
+                    "slot_count": len(available_slots),
+                    "reason": "doctor_on_leave" if schedule.leave_date == appointment_date else None,
+                }
+            )
+        return result
+
+
+def list_doctors() -> list[dict[str, Any]]:
+    """All doctors from the database for name resolution."""
+    with SessionLocal() as db:
+        schedules = (
+            db.query(DoctorSchedule)
+            .join(Doctor, DoctorSchedule.doctor_id == Doctor.id)
+            .join(UserProfile, Doctor.profile_id == UserProfile.id)
+            .order_by(UserProfile.first_name, UserProfile.last_name)
+            .all()
+        )
+        return [
+            {
+                "doctor_id": schedule.doctor_id,
+                "doctor_name": schedule.doctor_name,
+                "specialization": schedule.specialization,
+                "photo_url": schedule.photo_url,
+            }
+            for schedule in schedules
+        ]

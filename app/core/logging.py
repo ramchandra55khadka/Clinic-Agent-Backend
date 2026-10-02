@@ -10,7 +10,7 @@ from contextvars import ContextVar
 
 from loguru import logger
 
-from app.config import settings
+from app.core.config import settings
 
 LOG_FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level:<8}</level> | "

@@ -10,7 +10,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.config import settings
+from app.core.config import settings
 from app.core.logging import logger, set_request_id
 
 #: Baseline hardening for an API (the frontend sets its own CSP, see next.config.ts).

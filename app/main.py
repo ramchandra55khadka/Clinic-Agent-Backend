@@ -11,14 +11,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.router import api_router
-from app.config import settings
+from app.api.router import api_router
+from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, logger
 from app.core.middleware import register_middleware
-from app.database.database import init_db
-from app.router import router as legacy_router
-from app.routers.health import router as health_router
+from app.db.session import init_db
 
 
 @asynccontextmanager
@@ -69,9 +67,9 @@ def create_app() -> FastAPI:
     register_middleware(app)
     register_exception_handlers(app)
 
-    app.include_router(health_router)
-    app.include_router(api_router, prefix=settings.api_v1_prefix)
-    app.include_router(legacy_router)
+    # One aggregator, exposed both unversioned and under the configured prefix.
+    app.include_router(api_router)
+    app.include_router(api_router, prefix=settings.api_prefix)
 
     @app.get("/", tags=["health"])
     async def root():

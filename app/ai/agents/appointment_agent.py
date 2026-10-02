@@ -4,9 +4,10 @@ from typing import Any
 from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate
 from loguru import logger
 
-from app.database.crud import create_appointment, get_appointments_by_doctor, get_doctor_schedule
-from app.database.database import get_db
-from app.llm_client import LLMClient
+from app.ai.llm_client import LLMClient
+from app.ai.prompts.appointment_agent_prompt import APPOINTMENT_HUMAN_PROMPT, APPOINTMENT_SYSTEM_PROMPT
+from app.db.session import get_db
+from app.repositories import create_appointment, get_appointments_by_doctor, get_doctor_schedule
 from app.services.availability import check_availability
 
 
@@ -29,33 +30,11 @@ class AppointmentAgent:
         self.llm = LLMClient(model=llm_model, temperature=temperature)
 
         # --------------------------
-        # System prompt
+        # Final Prompt Template
         # --------------------------
-        system_prompt = """
-        You are a friendly clinical appointment assistant.
-        Guide users to book appointments:
-        1. Ask for doctor if not provided
-        2. Check doctor schedule, leave days, and existing appointments
-        3. Suggest available slots only
-        4. Collect patient info: name, age, sex, email, phone
-        5. Confirm booking and save to database
-        6. Never guess schedule
-        7. Use polite, professional language
-        """.strip()
-
-        human_prompt = """
-        CONTEXT:
-        {context}
-
-        USER MESSAGE:
-        {query}
-
-        Respond clearly and guide the user step by step.
-        """.strip()
-
         self.prompt_template = ChatPromptTemplate.from_messages([
-            SystemMessagePromptTemplate.from_template(system_prompt),
-            HumanMessagePromptTemplate.from_template(human_prompt)
+            SystemMessagePromptTemplate.from_template(APPOINTMENT_SYSTEM_PROMPT),
+            HumanMessagePromptTemplate.from_template(APPOINTMENT_HUMAN_PROMPT)
         ])
 
     # -----------------------------------------------------------------

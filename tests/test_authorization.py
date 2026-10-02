@@ -15,11 +15,20 @@ PROTECTED_ENDPOINTS = [
     ("POST", "/rag"),
     ("POST", "/mcp/check-availability"),
     ("POST", "/mcp/book-appointment"),
-    ("GET", "/api/v1/auth/me"),
-    ("POST", "/api/v1/auth/change-password"),
+    ("GET", "/api/auth/me"),
+    ("POST", "/api/auth/change-password"),
 ]
 
-ADMIN_ONLY_MUTATIONS = [
+ADMIN_ONLY_ENDPOINTS = [
+    ("GET", "/api/auth/users"),
+    ("POST", "/api/auth/users"),
+    ("PATCH", "/api/auth/users/1/role"),
+    ("PATCH", "/api/auth/users/1/active"),
+]
+
+# Doctor/availability management moved from admin-only to staff-or-admin, so it
+# is asserted precisely in `test_roles.py`; patients must still be refused.
+STAFF_ONLY_ENDPOINTS = [
     ("POST", "/doctor-schedule/"),
     ("PUT", "/doctor-schedule/1"),
     ("DELETE", "/doctor-schedule/1"),
@@ -39,8 +48,8 @@ def test_protected_endpoints_reject_anonymous_callers(client, method, path):
     assert "WWW-Authenticate" in response.headers
 
 
-@pytest.mark.parametrize("method,path", ADMIN_ONLY_MUTATIONS)
-def test_patients_cannot_reach_admin_endpoints(client, make_user, method, path):
+@pytest.mark.parametrize("method,path", ADMIN_ONLY_ENDPOINTS + STAFF_ONLY_ENDPOINTS)
+def test_patients_cannot_reach_staff_or_admin_endpoints(client, make_user, method, path):
     patient = make_user(role="patient")
     response = client.request(method, path, headers=patient["headers"], json={})
     assert response.status_code == 403, f"{method} {path} returned {response.status_code}"

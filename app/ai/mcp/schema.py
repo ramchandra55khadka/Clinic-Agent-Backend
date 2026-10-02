@@ -3,7 +3,7 @@ from datetime import time as Time
 
 from pydantic import BaseModel
 
-from app.database.schema import AppointmentCreate
+from app.schemas.appointment import AppointmentCreate
 
 
 class MCPAvailabilityRequest(BaseModel):

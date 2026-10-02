@@ -9,15 +9,15 @@ applied to databases that were created with ``create_all()`` and already contain
 some (or all) of these objects.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0002_production_hardening"
-down_revision: Union[str, None] = "0001_initial"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0001_initial"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _table_names() -> set[str]:
@@ -49,7 +49,7 @@ def upgrade() -> None:
             sa.Column("id", sa.Integer(), primary_key=True),
             sa.Column(
                 "user_id",
-                sa.Integer(),
+                sa.String(length=36),
                 sa.ForeignKey("user_account.id", ondelete="CASCADE"),
                 nullable=False,
             ),
@@ -71,7 +71,7 @@ def upgrade() -> None:
             sa.Column("id", sa.Integer(), primary_key=True),
             sa.Column(
                 "actor_id",
-                sa.Integer(),
+                sa.String(length=36),
                 sa.ForeignKey("user_account.id", ondelete="SET NULL"),
                 nullable=True,
             ),

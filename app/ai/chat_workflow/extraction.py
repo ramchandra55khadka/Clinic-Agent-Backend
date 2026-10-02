@@ -1,6 +1,10 @@
 import re
-from datetime import date, datetime, timedelta
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+from app.core.config import settings
 
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 PHONE_RE = re.compile(r"(?:\+?\d[\d\s-]{6,}\d)")
@@ -23,10 +27,28 @@ FIELD_QUESTIONS = {
 
 REQUIRED_FIELDS = ["doctor_id", "date", "time", "patient_name", "age", "sex", "email", "phone"]
 
+MemoryKey = Literal[
+    "preferred_doctor",
+    "preferred_specialty",
+    "preferred_time",
+    "language",
+    "contact_preference",
+    "books_for_family",
+]
+
+
+class ExtractedMemory(BaseModel):
+    key: MemoryKey
+    value: str = Field(max_length=200)
+
+
+class ExtractionResult(BaseModel):
+    memories: list[ExtractedMemory] = []
+
 
 def parse_date(text: str):
     lowered = text.lower()
-    today = date.today()
+    today = datetime.now(settings.clinic_tzinfo).date()
     if "tomorrow" in lowered:
         return today + timedelta(days=1)
     if "today" in lowered:

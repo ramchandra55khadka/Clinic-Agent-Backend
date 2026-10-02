@@ -61,6 +61,6 @@ def test_dependency_raises_429_with_retry_after(monkeypatch):
 
 def test_dependency_is_disabled_by_settings(client):
     # `client` is requested so the app is imported; RATE_LIMIT_ENABLED=false in tests.
-    from app.config import settings
+    from app.core.config import settings
 
     assert settings.rate_limit_enabled is False

@@ -3,8 +3,8 @@ from email.message import EmailMessage
 
 from loguru import logger
 
-from app.config import settings
-from app.database.models import Appointment
+from app.core.config import settings
+from app.models.appointment import Appointment
 
 
 def send_appointment_confirmation(appointment: Appointment) -> str:
@@ -48,8 +48,8 @@ def send_confirmation_for_appointment_id(appointment_id: int) -> str:
     Background tasks run after the response is sent, so the request-scoped ORM
     object is no longer available — only the id is safe to pass along.
     """
-    from app.database.database import SessionLocal
-    from app.database.models import Appointment as AppointmentModel
+    from app.db.session import SessionLocal
+    from app.models.appointment import Appointment as AppointmentModel
 
     with SessionLocal() as session:
         appointment = session.get(AppointmentModel, appointment_id)

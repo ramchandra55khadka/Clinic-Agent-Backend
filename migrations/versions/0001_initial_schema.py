@@ -10,15 +10,15 @@ tables and must be stamped rather than upgraded into this revision:
     alembic stamp 0001_initial && alembic upgrade head
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0001_initial"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -27,6 +27,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("doctor_name", sa.String(), nullable=False),
         sa.Column("specialization", sa.String(), nullable=True),
+        sa.Column("photo_url", sa.Text(), nullable=True),
         sa.Column("start_time", sa.Time(), nullable=False),
         sa.Column("end_time", sa.Time(), nullable=False),
         sa.Column("break_start", sa.Time(), nullable=True),
@@ -40,7 +41,7 @@ def upgrade() -> None:
 
     op.create_table(
         "user_account",
-        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("id", sa.String(length=36), primary_key=True),
         sa.Column("full_name", sa.String(), nullable=False),
         sa.Column("email", sa.String(), nullable=False),
         sa.Column("phone", sa.String(), nullable=True),
@@ -75,7 +76,7 @@ def upgrade() -> None:
     op.create_table(
         "user_auth",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("user_account.id"), nullable=False),
+        sa.Column("user_id", sa.String(length=36), sa.ForeignKey("user_account.id"), nullable=False),
         sa.Column("password_hash", sa.String(), nullable=False),
         sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),

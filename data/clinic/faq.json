@@ -1,0 +1,184 @@
+{
+  "faqs": [
+    {
+      "id": "faq_001",
+      "category": "clinic",
+      "question": "What is Nishant Care?",
+      "answer": "Nishant Care is a healthcare clinic in Baneshwor, Kathmandu, providing general medical care, specialist consultations, preventive healthcare, diagnostic services, and patient support."
+    },
+    {
+      "id": "faq_002",
+      "category": "clinic",
+      "question": "Where is Nishant Care located?",
+      "answer": "Nishant Care is located in Baneshwor, Kathmandu, Nepal."
+    },
+    {
+      "id": "faq_003",
+      "category": "contact",
+      "question": "How can I contact Nishant Care?",
+      "answer": "You can contact Nishant Care by calling 9866835892 during clinic hours."
+    },
+    {
+      "id": "faq_004",
+      "category": "clinic",
+      "question": "What are Nishant Care's opening hours?",
+      "answer": "Nishant Care is generally open from 7:00 AM to 8:00 PM, Sunday to Friday, and from 8:00 AM to 6:00 PM on Saturday."
+    },
+    {
+      "id": "faq_005",
+      "category": "appointment",
+      "question": "How can I book an appointment?",
+      "answer": "You can book an appointment by calling 9866835892, contacting the clinic reception, or using the clinic's online appointment system."
+    },
+    {
+      "id": "faq_006",
+      "category": "appointment",
+      "question": "Can I choose a specific doctor?",
+      "answer": "Yes. You can request a specific doctor when booking an appointment, subject to the doctor's availability."
+    },
+    {
+      "id": "faq_007",
+      "category": "appointment",
+      "question": "How early should I arrive for my appointment?",
+      "answer": "Patients are encouraged to arrive 10 to 15 minutes before their scheduled appointment."
+    },
+    {
+      "id": "faq_008",
+      "category": "appointment",
+      "question": "Can I cancel my appointment?",
+      "answer": "Yes. You can request appointment cancellation by contacting Nishant Care as early as possible."
+    },
+    {
+      "id": "faq_009",
+      "category": "appointment",
+      "question": "Can I reschedule my appointment?",
+      "answer": "Yes. You can request to reschedule your appointment, subject to available appointment slots."
+    },
+    {
+      "id": "faq_010",
+      "category": "appointment",
+      "question": "Can I walk in without an appointment?",
+      "answer": "Walk-in visits may be accepted depending on clinic capacity and doctor availability. Contact Nishant Care before visiting to confirm."
+    },
+    {
+      "id": "faq_011",
+      "category": "services",
+      "question": "What services does Nishant Care provide?",
+      "answer": "Nishant Care provides general medicine, specialist consultations, preventive healthcare, diagnostic services, and health education."
+    },
+    {
+      "id": "faq_012",
+      "category": "services",
+      "question": "What specialist consultations are available?",
+      "answer": "Specialist consultations may include Cardiology, Dermatology, Pediatrics, Gynecology, Orthopedics, and other specialties depending on doctor availability."
+    },
+    {
+      "id": "faq_013",
+      "category": "services",
+      "question": "Does Nishant Care provide diagnostic services?",
+      "answer": "Yes. Nishant Care provides or coordinates selected diagnostic services, which may include laboratory tests, ECG, ultrasound, X-ray, and other investigations depending on availability."
+    },
+    {
+      "id": "faq_014",
+      "category": "services",
+      "question": "Does Nishant Care provide preventive healthcare?",
+      "answer": "Yes. Nishant Care provides preventive healthcare services as part of its healthcare offerings."
+    },
+    {
+      "id": "faq_015",
+      "category": "services",
+      "question": "Does Nishant Care provide health education?",
+      "answer": "Yes. Health education is included among the services provided by Nishant Care."
+    },
+    {
+      "id": "faq_016",
+      "category": "patient",
+      "question": "What should I bring to my appointment?",
+      "answer": "Bring identification and, when applicable, previous medical reports, prescriptions, diagnostic reports, and referral documents."
+    },
+    {
+      "id": "faq_017",
+      "category": "patient",
+      "question": "Do I need to register before visiting the clinic?",
+      "answer": "Patients may need to complete registration before receiving healthcare services. The clinic may request personal and contact information during registration."
+    },
+    {
+      "id": "faq_018",
+      "category": "patient",
+      "question": "Should I bring my previous medical reports?",
+      "answer": "Yes. If relevant to your consultation, bringing previous medical reports can help the healthcare professional understand your medical history."
+    },
+    {
+      "id": "faq_019",
+      "category": "medical",
+      "question": "Can the clinic assistant diagnose my condition?",
+      "answer": "No. The clinic assistant provides general health education and clinic information. It does not diagnose medical conditions or replace a qualified healthcare professional."
+    },
+    {
+      "id": "faq_020",
+      "category": "medical",
+      "question": "Can the clinic assistant prescribe medicine?",
+      "answer": "No. The clinic assistant does not prescribe medicines or recommend changes to prescribed treatments."
+    },
+    {
+      "id": "faq_021",
+      "category": "medical",
+      "question": "Can the clinic assistant provide medical advice?",
+      "answer": "The clinic assistant can provide general health information and educational guidance but does not replace advice from a qualified healthcare professional."
+    },
+    {
+      "id": "faq_022",
+      "category": "medical",
+      "question": "What should I do in a medical emergency?",
+      "answer": "If you experience potentially life-threatening symptoms, seek immediate emergency medical care or contact the appropriate emergency service. Do not rely on the clinic assistant for emergency treatment."
+    },
+    {
+      "id": "faq_023",
+      "category": "payment",
+      "question": "What payment methods does Nishant Care accept?",
+      "answer": "Nishant Care accepts cash, debit or credit cards, bank transfers, digital wallets, and QR payments."
+    },
+    {
+      "id": "faq_024",
+      "category": "payment",
+      "question": "Do I need to pay for my appointment?",
+      "answer": "Consultation and other healthcare services may have applicable fees. Contact Nishant Care for current pricing and payment information."
+    },
+    {
+      "id": "faq_025",
+      "category": "privacy",
+      "question": "How does Nishant Care protect patient information?",
+      "answer": "Nishant Care respects patient privacy and aims to protect personal and healthcare information through appropriate confidentiality practices."
+    },
+    {
+      "id": "faq_026",
+      "category": "appointment",
+      "question": "What happens if I arrive late for my appointment?",
+      "answer": "If you arrive late, your appointment may be delayed or rescheduled depending on the doctor's schedule. Contact the clinic as soon as possible if you expect to be late."
+    },
+    {
+      "id": "faq_027",
+      "category": "appointment",
+      "question": "Can I book an appointment for someone else?",
+      "answer": "Yes. You can contact Nishant Care to book an appointment on behalf of another patient. The clinic may require the patient's personal information."
+    },
+    {
+      "id": "faq_028",
+      "category": "services",
+      "question": "Can I consult a specialist at Nishant Care?",
+      "answer": "Yes. Specialist consultations may be available depending on the specialty and doctor availability. Contact Nishant Care to confirm."
+    },
+    {
+      "id": "faq_029",
+      "category": "clinic",
+      "question": "Is Nishant Care open on Saturday?",
+      "answer": "Yes. Nishant Care is generally open on Saturday from 8:00 AM to 6:00 PM."
+    },
+    {
+      "id": "faq_030",
+      "category": "contact",
+      "question": "How can I get more information about Nishant Care?",
+      "answer": "For additional information about services, appointments, or clinic facilities, contact Nishant Care at 9866835892 or visit the clinic reception in Baneshwor, Kathmandu."
+    }
+  ]
+}

@@ -16,6 +16,9 @@ __pycache__
 *.sqlite3
 *.log
 
+# Generated at runtime from data/
+vector_db
+
 # Git / editor / CI
 .git
 .gitignore

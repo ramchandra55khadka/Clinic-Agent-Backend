@@ -1,7 +1,7 @@
 """Test configuration.
 
 Environment variables are set *before* the application is imported, because
-``app.config`` reads them at import time. Tests run against a throwaway SQLite
+``app.core.config`` reads them at import time. Tests run against a throwaway SQLite
 file and never touch the Postgres database configured in ``.env``.
 """
 
@@ -24,17 +24,10 @@ os.environ["LOG_JSON"] = "false"
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+import app.models  # noqa: E402,F401  (registers every model on Base.metadata)
+from app import repositories  # noqa: E402
 from app.core.rate_limit import store  # noqa: E402
-from app.database import crud  # noqa: E402
-from app.database.database import Base, SessionLocal, engine  # noqa: E402
-from app.database.models import (  # noqa: E402,F401  (registers models on Base.metadata)
-    Appointment,
-    AuditLog,
-    DoctorSchedule,
-    RefreshToken,
-    UserAccount,
-    UserAuth,
-)
+from app.db.session import Base, SessionLocal, engine  # noqa: E402
 
 DEFAULT_PASSWORD = "Sup3rSecret1"
 
@@ -69,15 +62,15 @@ def make_user(client):
     def _make(role: str = "patient", password: str = DEFAULT_PASSWORD) -> dict:
         email = f"{role}-{uuid4().hex[:10]}@example.com"
         response = client.post(
-            "/api/v1/auth/register",
-            json={"full_name": "Test User", "email": email, "password": password},
+            "/api/auth/register",
+            json={"first_name": "Test", "last_name": "User", "email": email, "password": password},
         )
         assert response.status_code == 201, response.text
 
         if role != "patient":
             with SessionLocal() as db:
-                user = crud.get_user_by_email(db, email)
-                crud.set_user_role(db, user, role)
+                user = repositories.get_user_by_email(db, email)
+                repositories.set_user_role(db, user, role)
 
         body = response.json()
         return {

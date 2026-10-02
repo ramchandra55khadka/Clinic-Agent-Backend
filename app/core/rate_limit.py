@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 from fastapi import HTTPException, Request, status
 
-from app.config import settings
+from app.core.config import settings
 
 
 class WindowStore:
@@ -71,6 +71,6 @@ def rate_limit(
 
 
 def ip_key(request: Request) -> str:
-    from app.dependencies.auth import client_ip
+    from app.api.deps import client_ip
 
     return client_ip(request) or "unknown"

@@ -15,7 +15,7 @@ from typing import Any
 import jwt
 from jwt import ExpiredSignatureError, InvalidTokenError
 
-from app.config import settings
+from app.core.config import settings
 
 PBKDF2_ITERATIONS = 120_000
 REFRESH_TOKEN_BYTES = 48

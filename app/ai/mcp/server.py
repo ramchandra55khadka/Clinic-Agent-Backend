@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.ai.mcp.mcp_tools import book_appointment, check_slots, explain_slot
 from app.ai.mcp.schema import MCPAvailabilityRequest, MCPBookAppointmentRequest
-from app.dependencies.auth import get_current_user
+from app.api.deps import get_current_user
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 

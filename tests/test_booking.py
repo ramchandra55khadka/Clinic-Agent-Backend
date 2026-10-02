@@ -5,9 +5,9 @@ from datetime import date, time
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.database import crud
-from app.database.database import SessionLocal
-from app.database.schema import AppointmentCreate
+from app import repositories
+from app.db.session import SessionLocal
+from app.schemas.appointment import AppointmentCreate
 
 FUTURE_DATE = "2030-01-07"
 
@@ -43,7 +43,7 @@ def test_patient_can_book_an_available_slot(client, make_user, doctor):
 
     # The confirmation email is sent after the response, so the persisted status
     # reflects the real outcome (skipped when SMTP is disabled).
-    from app.database.models import Appointment
+    from app.models.appointment import Appointment
 
     with SessionLocal() as db:
         stored = db.get(Appointment, body["id"])
@@ -68,9 +68,9 @@ def test_database_constraint_prevents_double_booking(client, make_user, doctor):
     payload = _appointment_payload(doctor_id)
 
     with SessionLocal() as db:
-        crud.create_appointment(db, AppointmentCreate(**payload))
+        repositories.create_appointment(db, AppointmentCreate(**payload))
         with pytest.raises(IntegrityError):
-            crud.create_appointment(db, AppointmentCreate(**payload))
+            repositories.create_appointment(db, AppointmentCreate(**payload))
         db.rollback()
 
 

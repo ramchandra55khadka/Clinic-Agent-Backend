@@ -5,6 +5,11 @@ __pycache__/
 venv/
 env/
 
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
 # UV cache & lock (optional: remove if you want to commit uv.lock)
 .uv_cache/
 .uv/
@@ -12,8 +17,10 @@ env/
 # Environment
 .env
 
-# Project data (never commit real PDFs or vector DB)
-!data/.gitkeep    # remove this line if you don't use .gitkeep
+# Knowledge base: source PDFs under data/ ARE committed (the image needs them),
+# but the FAISS index is generated at runtime and never committed.
+data/**/vector_db/
+vector_db/
 
 # IDE
 .idea/

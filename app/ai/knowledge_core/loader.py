@@ -6,7 +6,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from loguru import logger
 
-from app.config import CHUNK_OVERLAP, CHUNK_SIZE
+from app.core.config import CHUNK_OVERLAP, CHUNK_SIZE
 
 
 class PDFLoader:
@@ -36,18 +36,32 @@ class PDFLoader:
 
         logger.debug(f"PDFLoader initialized: {self.pdf_dir}, stream={self.stream_mode}")
 
+    def _discover_pdfs(self, root: str) -> list[str]:
+        """Every ``*.pdf`` under ``root``, including nested subfolders."""
+        found: list[str] = []
+        for dir_path, _dir_names, file_names in os.walk(root):
+            found.extend(
+                os.path.join(dir_path, file_name)
+                for file_name in file_names
+                if file_name.lower().endswith(".pdf")
+            )
+        return found
+
     def load_documents(self) -> list[Document]:
         if not os.path.isdir(self.pdf_dir):
             raise FileNotFoundError(f"Directory missing: {self.pdf_dir}")
 
-        pdf_files = [f for f in os.listdir(self.pdf_dir) if f.lower().endswith(".pdf")]
+        pdf_files = sorted(self._discover_pdfs(self.pdf_dir))
         if not pdf_files:
-            raise FileNotFoundError("No PDFs found.")
+            raise FileNotFoundError(f"No PDFs found under {self.pdf_dir}.")
 
         all_docs = []
 
-        for file_name in pdf_files:
-            file_path = os.path.join(self.pdf_dir, file_name)
+        for file_path in pdf_files:
+            # Relative-to-root, extension-less id: stays unique when two
+            # subfolders each hold a same-named PDF.
+            source_id = os.path.splitext(os.path.relpath(file_path, self.pdf_dir))[0]
+            file_name = os.path.basename(file_path)
             pages: list[Document] = []
 
             try:
@@ -57,7 +71,7 @@ class PDFLoader:
                     for i in range(doc.page_count):
                         text = doc[i].get_text("text")
                         if text.strip():
-                            pages.append(Document(page_content=text, metadata={"source": file_name, "page": i}))
+                            pages.append(Document(page_content=text, metadata={"source": source_id, "page": i}))
                     doc.close()
                 else:
                     # Streaming mode: load PDF in batches
@@ -69,7 +83,7 @@ class PDFLoader:
                         for i in range(start, end):
                             text = doc[i].get_text("text")
                             if text.strip():
-                                pages.append(Document(page_content=text, metadata={"source": file_name, "page": i}))
+                                pages.append(Document(page_content=text, metadata={"source": source_id, "page": i}))
                         # free memory per batch
                         gc.collect()
                     doc.close()
@@ -84,7 +98,7 @@ class PDFLoader:
                 # Add full metadata to chunks
                 for i, chunk in enumerate(chunks):
                     chunk.metadata |= {
-                        "source": os.path.splitext(file_name)[0],
+                        "source": source_id,
                         "file_path": file_path,
                         "chunk_id": i,
                         "total_chunks": len(chunks),

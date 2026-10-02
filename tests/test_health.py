@@ -22,7 +22,7 @@ def test_readiness_checks_the_database(client):
 
 
 def test_health_is_also_exposed_under_the_versioned_prefix(client):
-    assert client.get("/api/v1/health/live").json() == {"status": "alive"}
+    assert client.get("/api/health/live").json() == {"status": "alive"}
 
 
 def test_responses_carry_request_id_and_security_headers(client):

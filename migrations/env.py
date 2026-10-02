@@ -1,6 +1,6 @@
 """Alembic environment.
 
-The database URL comes from `app.config` (i.e. `.env`), so migrations and the
+The database URL comes from `app.core.config` (i.e. `.env`), so migrations and the
 API can never drift apart. `target_metadata` is the ORM metadata, which makes
 `alembic revision --autogenerate` compare against the real models.
 """
@@ -10,9 +10,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-import app.database.models  # noqa: F401  (registers every model on Base.metadata)
-from app.config import settings
-from app.database.database import Base
+import app.models  # noqa: F401  (registers every model on Base.metadata)
+from app.core.config import settings
+from app.db.base import Base
 
 config = context.config
 

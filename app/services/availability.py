@@ -4,7 +4,8 @@ from datetime import time as Time
 
 from sqlalchemy.orm import Session
 
-from app.database.models import Appointment, DoctorSchedule
+from app.models.appointment import Appointment
+from app.models.doctor_schedule import DoctorSchedule
 
 
 def _to_date(value: str | Date) -> Date:
@@ -23,11 +24,22 @@ def _overlaps(start_a: datetime, end_a: datetime, start_b: datetime, end_b: date
     return start_a < end_b and end_a > start_b
 
 
-def explain_unavailability(db: Session, doctor_id: int, appointment_date, appointment_time) -> str | None:
+def explain_unavailability(
+    db: Session,
+    doctor_id: int,
+    appointment_date,
+    appointment_time,
+    exclude_appointment_id: int | None = None,
+) -> str | None:
+    """Reason the slot cannot be booked, or ``None`` when it is free.
+
+    ``exclude_appointment_id`` ignores one existing appointment — used when a
+    patient keeps or moves their own booking, which must not collide with itself.
+    """
     appointment_date = _to_date(appointment_date)
     appointment_time = _to_time(appointment_time)
 
-    schedule = db.query(DoctorSchedule).filter(DoctorSchedule.id == doctor_id).first()
+    schedule = db.query(DoctorSchedule).filter(DoctorSchedule.doctor_id == doctor_id).first()
     if not schedule:
         return "doctor_not_found"
 
@@ -51,11 +63,14 @@ def explain_unavailability(db: Session, doctor_id: int, appointment_date, appoin
         if _overlaps(appt_start, appt_end, break_start, break_end):
             return "during_break"
 
-    appointments = db.query(Appointment).filter(
+    overlapping = db.query(Appointment).filter(
         Appointment.doctor_id == doctor_id,
         Appointment.date == appointment_date,
         Appointment.status != "cancelled",
-    ).all()
+    )
+    if exclude_appointment_id is not None:
+        overlapping = overlapping.filter(Appointment.id != exclude_appointment_id)
+    appointments = overlapping.all()
 
     for appointment in appointments:
         existing_start = datetime.combine(appointment_date, appointment.time)
@@ -70,9 +85,14 @@ def check_availability(db: Session, doctor_id: int, appointment_date, appointmen
     return explain_unavailability(db, doctor_id, appointment_date, appointment_time) is None
 
 
-def get_available_slots(db: Session, doctor_id: int, appointment_date) -> list[dict]:
+def get_available_slots(
+    db: Session,
+    doctor_id: int,
+    appointment_date,
+    exclude_appointment_id: int | None = None,
+) -> list[dict]:
     appointment_date = _to_date(appointment_date)
-    schedule = db.query(DoctorSchedule).filter(DoctorSchedule.id == doctor_id).first()
+    schedule = db.query(DoctorSchedule).filter(DoctorSchedule.doctor_id == doctor_id).first()
     if not schedule:
         return []
 
@@ -82,7 +102,13 @@ def get_available_slots(db: Session, doctor_id: int, appointment_date) -> list[d
     slots: list[dict] = []
 
     while cursor + timedelta(minutes=duration) <= end:
-        reason = explain_unavailability(db, doctor_id, appointment_date, cursor.time())
+        reason = explain_unavailability(
+            db,
+            doctor_id,
+            appointment_date,
+            cursor.time(),
+            exclude_appointment_id=exclude_appointment_id,
+        )
         slots.append({
             "time": cursor.time(),
             "available": reason is None,

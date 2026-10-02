@@ -11,10 +11,10 @@ from datetime import datetime
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.database import crud
-from app.database.models import Appointment
-from app.database.schema import AppointmentCreate
+from app import repositories
+from app.core.config import settings
+from app.models.appointment import Appointment
+from app.schemas.appointment import AppointmentCreate, AppointmentUpdate
 from app.services.availability import explain_unavailability
 
 
@@ -47,7 +47,7 @@ def book_appointment(db: Session, appointment: AppointmentCreate) -> Appointment
         raise BookingError(reason, f"That slot is not available ({reason.replace('_', ' ')}).")
 
     try:
-        saved = crud.create_appointment(db, appointment, commit=False)
+        saved = repositories.create_appointment(db, appointment, commit=False)
         db.commit()
         db.refresh(saved)
     except IntegrityError as exc:
@@ -60,3 +60,56 @@ def book_appointment(db: Session, appointment: AppointmentCreate) -> Appointment
         ) from exc
 
     return saved
+
+
+def update_owned_appointment(
+    db: Session,
+    appointment: Appointment,
+    payload: AppointmentUpdate,
+) -> Appointment:
+    """Applies a patient's own edits (details and/or reschedule).
+
+    A moved appointment is validated exactly like a new booking, except that the
+    appointment itself is excluded from the availability check.
+    """
+    changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+    if not changes:
+        return appointment
+
+    rescheduled = "date" in changes or "time" in changes
+    if rescheduled:
+        new_date = changes.get("date", appointment.date)
+        new_time = changes.get("time", appointment.time)
+
+        if is_in_the_past(new_date, new_time):
+            raise BookingError(
+                "in_the_past",
+                "That time has already passed. Please choose a later slot.",
+            )
+
+        reason = explain_unavailability(
+            db,
+            appointment.doctor_id,
+            new_date,
+            new_time,
+            exclude_appointment_id=appointment.id,
+        )
+        if reason is not None:
+            raise BookingError(reason, f"That slot is not available ({reason.replace('_', ' ')}).")
+
+    try:
+        return repositories.update_appointment(db, appointment, changes)
+    except IntegrityError as exc:
+        db.rollback()
+        raise BookingError(
+            "slot_taken",
+            "That slot was just booked. Please choose another.",
+            status_code=409,
+        ) from exc
+
+
+def cancel_owned_appointment(db: Session, appointment: Appointment) -> Appointment:
+    """Marks the appointment cancelled, which frees the slot for others."""
+    if appointment.status == "cancelled":
+        return appointment
+    return repositories.update_appointment(db, appointment, {"status": "cancelled"})

@@ -1,0 +1,109 @@
+"""Doctor and working-hours repositories."""
+
+from sqlalchemy.orm import Session
+
+from app.models.doctor import Doctor
+from app.models.doctor_schedule import DoctorSchedule
+from app.models.user_profile import UserProfile
+from app.schemas.doctor import DoctorScheduleCreate, DoctorScheduleUpdate
+
+
+def create_doctor_schedule(db: Session, schedule: DoctorScheduleCreate):
+    """Creates the normalized doctor (a ``user_profile`` + ``doctor``) and its hours."""
+    data = schedule.model_dump()
+
+    profile = UserProfile(full_name=data["doctor_name"], photo_url=data.get("photo_url"))
+    doctor = Doctor(
+        profile=profile,
+        specialization=data.get("specialization"),
+        license_number=data.get("license_number"),
+        qualification=data.get("qualification"),
+        experience_years=data.get("experience_years"),
+        bio=data.get("bio"),
+        consultation_fee=data.get("consultation_fee"),
+        consultation_duration=data.get("consultation_duration") or data.get("slot_duration") or 30,
+        is_verified=bool(data.get("is_verified")),
+    )
+    db.add(doctor)
+    db.flush()
+
+    db_schedule = DoctorSchedule(
+        doctor_id=doctor.id,
+        start_time=data["start_time"],
+        end_time=data["end_time"],
+        break_start=data.get("break_start"),
+        break_end=data.get("break_end"),
+        leave_date=data.get("leave_date"),
+        slot_duration=data.get("slot_duration") or doctor.consultation_duration or 30,
+    )
+    db.add(db_schedule)
+    db.commit()
+    db.refresh(db_schedule)
+    return db_schedule
+
+
+def get_doctor_schedule(db: Session, doctor_id: int):
+    """The (single) working-hours row of a doctor, addressed by the doctor id."""
+    return db.query(DoctorSchedule).filter(DoctorSchedule.doctor_id == doctor_id).first()
+
+
+def get_all_doctor_schedules(db: Session):
+    return db.query(DoctorSchedule).all()
+
+
+def get_doctor(db: Session, doctor_id: int):
+    return db.query(Doctor).filter(Doctor.id == doctor_id).first()
+
+
+#: Fields that live on the schedule row itself.
+_SCHEDULE_FIELDS = {"start_time", "end_time", "break_start", "break_end", "leave_date", "slot_duration"}
+#: Fields that live on the normalized ``doctor`` row.
+_DOCTOR_FIELDS = {
+    "specialization",
+    "license_number",
+    "qualification",
+    "experience_years",
+    "bio",
+    "consultation_fee",
+    "consultation_duration",
+    "is_verified",
+}
+
+
+def update_doctor_schedule(db: Session, doctor_id: int, schedule: DoctorScheduleUpdate):
+    db_schedule = get_doctor_schedule(db, doctor_id)
+    if not db_schedule:
+        return None
+
+    for key, value in schedule.model_dump(exclude_unset=True).items():
+        if key in _SCHEDULE_FIELDS:
+            setattr(db_schedule, key, value)
+        elif key == "doctor_name" and db_schedule.doctor.profile is not None:
+            db_schedule.doctor.profile.full_name = value
+        elif key == "photo_url" and db_schedule.doctor.profile is not None:
+            db_schedule.doctor.profile.photo_url = value
+        elif key in _DOCTOR_FIELDS and db_schedule.doctor is not None:
+            setattr(db_schedule.doctor, key, value)
+
+    db.commit()
+    db.refresh(db_schedule)
+    return db_schedule
+
+
+def delete_doctor_schedule(db: Session, doctor_id: int):
+    db_schedule = get_doctor_schedule(db, doctor_id)
+    if not db_schedule:
+        return False
+
+    doctor = db_schedule.doctor
+    profile = doctor.profile if doctor else None
+    if profile is not None:
+        # Deleting the profile cascades to the doctor and its schedule(s).
+        db.delete(profile)
+    elif doctor is not None:  # pragma: no cover - defensive
+        db.delete(doctor)
+    else:  # pragma: no cover - defensive
+        db.delete(db_schedule)
+
+    db.commit()
+    return True

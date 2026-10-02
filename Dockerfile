@@ -18,12 +18,13 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-# Application code, migrations and the RAG assets (PDFs + prebuilt index).
+# Application code, migrations and the RAG source documents (PDFs).
+# The FAISS index is NOT copied: it is generated on first query from data/
+# (see EmbeddingsStore.build_or_load), so it stays out of the image.
 COPY app ./app
 COPY migrations ./migrations
-COPY alembic.ini main.py README.md ./
-COPY docs ./docs
-COPY vector_db ./vector_db
+COPY alembic.ini README.md ./
+COPY data ./data
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
