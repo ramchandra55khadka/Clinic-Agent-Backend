@@ -46,6 +46,9 @@ def explain_unavailability(
     if schedule.leave_date == appointment_date:
         return "doctor_on_leave"
 
+    if appointment_date.strftime("%A") not in schedule.days:
+        return "not_working_day"
+
     duration = schedule.slot_duration or 30
     appt_start = datetime.combine(appointment_date, appointment_time)
     appt_end = appt_start + timedelta(minutes=duration)

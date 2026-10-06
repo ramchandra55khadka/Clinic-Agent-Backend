@@ -243,7 +243,7 @@ def _summary_llm() -> LLMClient | None:
     if not settings.google_api_key:
         return None
     if _summary_client is None:
-        _summary_client = LLMClient(model="gemini-2.5-flash", temperature=0.0)
+        _summary_client = LLMClient()
     return _summary_client
 
 
@@ -326,6 +326,22 @@ def delete_conversation(db: Session, *, session_id: str, user_id: str) -> bool:
     db.delete(conversation)
     db.commit()
     return True
+
+
+def rename_conversation(db: Session, *, session_id: str, user_id: str, title: str) -> Conversation | None:
+    """Set a patient-chosen sidebar title for a thread.
+
+    Returns the updated row, or ``None`` when the thread is not owned by
+    ``user_id`` (the route turns that into a 404, same as replay/delete).
+    ``updated_at`` is deliberately untouched: renaming is not activity, so the
+    sidebar keeps its last-active ordering.
+    """
+    conversation = get_conversation(db, session_id=session_id, user_id=user_id)
+    if conversation is None:
+        return None
+    conversation.title = _derive_title(title, max_length=120)
+    db.commit()
+    return conversation
 
 
 def memory_enabled(db: Session, user: UserAccount) -> bool:
@@ -422,6 +438,74 @@ def upsert_memory(
     return memory
 
 
+#: Words that end a captured name (a sentence often continues after the name).
+_NAME_STOPWORDS = frozenset(
+    {
+        "a", "an", "and", "at", "but", "by", "can", "do", "for", "from", "good",
+        "here", "her", "his", "i", "in", "is", "it", "just", "like", "my", "need",
+        "new", "no", "not", "of", "ok", "okay", "on", "or", "our", "please", "sorry",
+        "that", "the", "their", "there", "this", "to", "want", "was", "we", "with",
+        "would", "yes", "you", "your",
+    }
+)
+
+#: Explicit self-introductions only. A bare "I am X" is deliberately excluded so
+#: "I am from Nepal" or "I am 30" can never be mistaken for a name.
+_NAME_STATEMENT_RES = (
+    re.compile(r"\bmy name(?:'s| is)\s+(?P<name>[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,2})", re.IGNORECASE),
+    re.compile(r"\byou can call me\s+(?P<name>[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,2})", re.IGNORECASE),
+    re.compile(r"\b(?:please\s+)?call me\s+(?P<name>[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,2})", re.IGNORECASE),
+    re.compile(r"\bi(?:'m| am) called\s+(?P<name>[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,2})", re.IGNORECASE),
+    re.compile(r"\bi go by\s+(?P<name>[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*){0,2})", re.IGNORECASE),
+)
+
+#: "what is my name", "what my name is", "do you know my name", "who am I", …
+_NAME_QUESTION_RE = re.compile(
+    r"\bwho am i\b|\bmy name\b[^.?!]*\?|\bwhat(?:'s| is| was)?\s+my name\b|\bwhat my name\b|"
+    r"\bdo you (?:know|remember) my name\b|\btell me my name\b",
+    re.IGNORECASE,
+)
+
+
+def _clean_stated_name(raw: str) -> str | None:
+    """Keep the leading run of name-like words, dropping a trailing sentence."""
+    tokens: list[str] = []
+    for token in raw.split():
+        cleaned = token.strip(".,!?;:\"'")
+        if not re.fullmatch(r"[A-Za-z][A-Za-z'\-]*", cleaned) or cleaned.lower() in _NAME_STOPWORDS:
+            break
+        tokens.append(cleaned[0].upper() + cleaned[1:])
+        if len(tokens) == 3:
+            break
+    return " ".join(tokens) or None
+
+
+def stated_name(message: str) -> str | None:
+    """The name a patient just introduced themselves with, or ``None``.
+
+    Only explicit phrasings count ("my name is…", "call me…"), never a bare
+    "I am …", so a stray "I am from Nepal" cannot overwrite the real name.
+    """
+    for pattern in _NAME_STATEMENT_RES:
+        match = pattern.search(message)
+        if match:
+            name = _clean_stated_name(match.group("name"))
+            if name:
+                return name
+    return None
+
+
+def is_name_question(message: str) -> bool:
+    """True when the patient is asking us to recall their name."""
+    return bool(_NAME_QUESTION_RE.search(message))
+
+
+def saved_name(db: Session, *, user_id: str) -> str | None:
+    """The name the patient asked us to remember, if any."""
+    memory = get_memory_by_key(db, user_id=user_id, key="name")
+    return memory.value if memory else None
+
+
 def _extract_memory_candidates(message: str) -> list[tuple[str, str]]:
     """Deterministic first-pass extraction for durable preferences.
 
@@ -434,6 +518,10 @@ def _extract_memory_candidates(message: str) -> list[tuple[str, str]]:
         return []
 
     candidates: list[tuple[str, str]] = []
+
+    name = stated_name(message)
+    if name:
+        candidates.append(("name", name))
 
     if re.search(r"\bprefer\b|\blike\b|\bworks best\b", lowered):
         if "morning" in lowered:
@@ -551,6 +639,7 @@ def clear_memories(db: Session, *, user_id: str) -> int:
 
 def render_memories_for_prompt(memories: list[LongTermMemory]) -> list[str]:
     labels = {
+        "name": "Name",
         "preferred_doctor": "Preferred doctor",
         "preferred_specialty": "Preferred specialty",
         "preferred_time": "Preferred time",

@@ -14,7 +14,7 @@ class ClinicChatState(TypedDict, total=False):
     long_term_memories: list[str]
     history: list[dict[str, Any]]
     summary: str
-    intent: Literal["doctor_bio", "availability", "booking", "faq", "medical_web", "fallback"]
+    intent: Literal["doctor_bio", "availability", "booking", "faq", "medical_web", "fallback", "out_of_scope"]
     response: str
     data: dict[str, Any]
     chunks: list[dict[str, Any]] | None

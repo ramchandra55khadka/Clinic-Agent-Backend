@@ -39,6 +39,13 @@ def _schedule_out(schedule) -> dict:
         "doctor_id": schedule.doctor_id,
         "schedule_id": schedule.id,
         "doctor_name": profile.full_name if profile else "",
+        "first_name": profile.first_name if profile else "",
+        "last_name": profile.last_name if profile else None,
+        "email": profile.email if profile else None,
+        "phone": profile.phone if profile else None,
+        "date_of_birth": profile.date_of_birth if profile else None,
+        "gender": profile.gender if profile else None,
+        "address": profile.address if profile else None,
         "specialization": doctor.specialization if doctor else None,
         "photo_url": profile.photo_url if profile else None,
         "start_time": schedule.start_time,
@@ -47,6 +54,7 @@ def _schedule_out(schedule) -> dict:
         "break_end": schedule.break_end,
         "leave_date": schedule.leave_date,
         "slot_duration": schedule.slot_duration,
+        "days": schedule.days,
         "license_number": doctor.license_number if doctor else None,
         "qualification": doctor.qualification if doctor else None,
         "experience_years": doctor.experience_years if doctor else None,
@@ -54,6 +62,18 @@ def _schedule_out(schedule) -> dict:
         "consultation_fee": doctor.consultation_fee if doctor else None,
         "consultation_duration": doctor.consultation_duration if doctor else None,
         "is_verified": doctor.is_verified if doctor else False,
+        "educations": [
+            {
+                "id": education.id,
+                "degree": education.degree,
+                "institution": education.institution,
+                "field_of_study": education.field_of_study,
+                "start_date": education.start_date,
+                "end_date": education.end_date,
+                "description": education.description,
+            }
+            for education in (doctor.educations if doctor else [])
+        ],
     }
 
 
@@ -112,7 +132,8 @@ def create_appointment(
 # Self-service: a patient's own appointments
 #
 # Declared before `/appointments/{doctor_id}` so "me" is not parsed as an id.
-# Ownership is the email the appointment was booked with.
+# Ownership is account-based: the booking's link to the caller's patient row,
+# or the account's own email for rows predating that link.
 # --------------------------------------------------------------------------- #
 
 def _owned_appointment(db: Session, appointment_id: int, user: UserAccount):
@@ -121,8 +142,7 @@ def _owned_appointment(db: Session, appointment_id: int, user: UserAccount):
     if appointment is None:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
-    owns_it = (appointment.email or "").strip().lower() == (user.email or "").strip().lower()
-    if not owns_it:
+    if not repositories.owns_appointment(db, user, appointment):
         raise HTTPException(status_code=404, detail="Appointment not found")
     return appointment
 
@@ -132,8 +152,10 @@ def list_my_appointments(
     db: Session = Depends(get_db),
     current_user: UserAccount = Depends(get_current_user),
 ):
-    """Every appointment booked with the signed-in patient's email."""
-    return repositories.get_appointments_by_email(db, current_user.email)
+    """Every appointment the signed-in account tracks — linked through its
+    patient row (regardless of the email typed while booking) plus bookings
+    made with the account's own email."""
+    return repositories.get_appointments_for_user(db, current_user)
 
 
 @router.get("/appointments/me/{appointment_id}", response_model=AppointmentOut)
@@ -206,6 +228,18 @@ def cancel_my_appointment(
     return updated
 
 
+@router.get("/appointments/", response_model=list[AppointmentOut])
+def list_all_appointments(db: Session = Depends(get_db), _staff=Depends(require_staff)):
+    """Clinic-wide tracking list: every appointment across every doctor.
+
+    Admins and front-desk staff run the clinic from one list; patients are
+    refused (they use ``/appointments/me``). Registered *before*
+    ``/appointments/{doctor_id}`` so the literal collection path is never
+    swallowed by the path parameter.
+    """
+    return repositories.get_all_appointments(db)
+
+
 @router.get("/appointments/{doctor_id}", response_model=list[AppointmentOut])
 def list_appointments(doctor_id: int, db: Session = Depends(get_db), _staff=Depends(require_staff)):
     """Clinic-wide view for staff: every appointment for one doctor.
@@ -255,10 +289,10 @@ def list_available_slots(
     rescheduling; it is ignored unless that appointment belongs to the caller.
     """
     excluded = exclude_appointment_id
-    if excluded is not None:
-        owned = repositories.get_appointment(db, excluded)
-        if owned is None or (owned.email or "").strip().lower() != (current_user.email or "").strip().lower():
-            excluded = None
+    if excluded is not None and not repositories.owns_appointment(
+        db, current_user, repositories.get_appointment(db, excluded)
+    ):
+        excluded = None
 
     slots = get_available_slots(db, doctor_id, appointment_date, exclude_appointment_id=excluded)
     if not slots:

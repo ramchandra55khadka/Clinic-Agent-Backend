@@ -43,7 +43,8 @@ def test_deleting_a_doctor_schedule_removes_the_doctor_and_its_profile(client, m
         "/doctor-schedule/",
         headers=admin["headers"],
         json={
-            "doctor_name": "Dr. Cascade Check",
+            "first_name": "Cascade",
+            "last_name": "Check",
             "specialization": "Dermatology",
             "start_time": "09:00:00",
             "end_time": "17:00:00",

@@ -11,6 +11,7 @@ from app.core.memory_keys import MEMORY_KEYS
 #: ``Literal`` rather than a plain ``str`` so FastAPI rejects an unknown key with
 #: a 422 that lists the valid ones.
 MemoryKey = Literal[
+    "name",
     "preferred_time",
     "preferred_doctor",
     "preferred_specialty",

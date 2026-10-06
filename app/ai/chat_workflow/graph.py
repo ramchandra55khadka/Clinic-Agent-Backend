@@ -10,6 +10,7 @@ from app.ai.chat_workflow.nodes import (
     fallback_node,
     faq_node,
     medical_web_node,
+    out_of_scope_node,
     route_intent,
     serialize_chunks,
 )
@@ -24,6 +25,7 @@ clinic_workflow.add_node("availability", availability_node)
 clinic_workflow.add_node("booking", booking_node)
 clinic_workflow.add_node("fallback", fallback_node)
 clinic_workflow.add_node("medical_web", medical_web_node)
+clinic_workflow.add_node("out_of_scope", out_of_scope_node)
 clinic_workflow.add_node("faq", faq_node)
 clinic_workflow.set_entry_point("route_intent")
 clinic_workflow.add_conditional_edges(
@@ -36,6 +38,7 @@ clinic_workflow.add_conditional_edges(
         "fallback": "fallback",
         "faq": "faq",
         "medical_web": "medical_web",
+        "out_of_scope": "out_of_scope",
     },
 )
 clinic_workflow.add_edge("doctor_bio", END)
@@ -43,6 +46,7 @@ clinic_workflow.add_edge("availability", END)
 clinic_workflow.add_edge("booking", END)
 clinic_workflow.add_edge("fallback", END)
 clinic_workflow.add_edge("medical_web", END)
+clinic_workflow.add_edge("out_of_scope", END)
 clinic_workflow.add_edge("faq", END)
 clinic_chat_app = clinic_workflow.compile()
 

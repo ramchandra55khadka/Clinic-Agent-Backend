@@ -20,6 +20,7 @@ from typing import Final
 
 #: Every preference slot, in the order the UI should offer them.
 MEMORY_KEYS: Final[tuple[str, ...]] = (
+    "name",
     "preferred_time",
     "preferred_doctor",
     "preferred_specialty",

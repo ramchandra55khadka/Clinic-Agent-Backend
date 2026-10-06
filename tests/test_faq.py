@@ -4,6 +4,7 @@
 import pytest
 
 from app.ai.agents.faq_agent import FAQAgent
+from app.ai.agents.rag_agent import RAGAgent
 from app.ai.chat_workflow import nodes
 
 
@@ -24,7 +25,7 @@ def faq_matches_real_file(monkeypatch):
 def test_faq_store_loads_all_entries():
     store = nodes._get_faq_agent()._get_store()
     assert store._faqs, "faq.json produced no entries"
-    assert len(store._faqs) == 30
+    assert len(store._faqs) == 31
     assert all(entry.question and entry.answer for entry in store._faqs)
     assert len({faq.id for faq in store._faqs}) == len(store._faqs)
 
@@ -87,6 +88,32 @@ def test_booking_intent_beats_faq(client, make_user):
     assert response.json()["intent"] == "booking"
 
 
+def test_appointment_information_questions_do_not_start_booking():
+    base_state = {
+        "conversation": {},
+        "patient": None,
+        "history": [],
+        "summary": "",
+        "long_term_memories": [],
+    }
+
+    for message in ["tell me appointment service of Nishant care", "Tell me about appointment confirmations"]:
+        assert nodes.route_intent({**base_state, "message": message})["intent"] == "faq"
+
+
+def test_faq_answers_appointment_confirmations(monkeypatch):
+    monkeypatch.setattr(
+        FAQAgent, "_compose", lambda self, question, match, system_prompt=None: match["answer"]
+    )
+
+    result = nodes._get_faq_agent().answer("Tell me about appointment confirmations")
+
+    assert result["matched"] is True
+    assert result["faq"]["id"] == "faq_031"
+    assert "email" in result["response"].lower()
+    assert "confirm" in result["response"].lower()
+
+
 def test_doctor_bio_beats_faq(client, make_user):
     patient = make_user()
     response = client.post(
@@ -143,6 +170,114 @@ def test_weak_faq_match_falls_back_to_rag(monkeypatch):
     assert "cardiac surgeon" in result["response"]
 
 
+def test_ungrounded_rag_answer_asks_clarifying_follow_up(monkeypatch):
+    """With no grounded clinic evidence, the assistant asks instead of guessing."""
+    monkeypatch.setattr(nodes, "_get_faq_agent", lambda: _StubFaq(matched=False))
+
+    class UncertainRag:
+        def answer(self, query, top_k=5, system_prompt=None):
+            return {
+                "response": "I don't have that information in my clinic knowledge base.",
+                "chunks": [],
+                "confidence": 0.0,
+                "grounded": False,
+            }
+
+    monkeypatch.setattr(nodes, "_get_rag_agent", lambda: UncertainRag())
+
+    result = nodes.faq_node({"message": "who founded this clinic and when"})
+
+    assert result["data"]["clarification"] is True
+    assert result["data"]["clarification_options"]
+    assert "?" in result["response"]
+    assert "rather ask" in result["response"]
+
+
+def test_grounded_rag_answer_still_answers_directly(monkeypatch):
+    monkeypatch.setattr(nodes, "_get_faq_agent", lambda: _StubFaq(matched=False))
+
+    class GroundedRag:
+        def answer(self, query, top_k=5, system_prompt=None):
+            return {
+                "response": "Nishant Care was founded in 2010.",
+                "chunks": [_StubDoc("Nishant Care was founded in 2010.", "clinic_info.pdf")],
+                "confidence": 0.8,
+                "grounded": True,
+            }
+
+    monkeypatch.setattr(nodes, "_get_rag_agent", lambda: GroundedRag())
+
+    result = nodes.faq_node({"message": "when was nishant care founded"})
+
+    assert result["data"] == {"faq_fallback": "rag"}
+    assert "2010" in result["response"]
+
+
+def test_doctor_bio_asks_follow_up_when_ungrounded(monkeypatch):
+    class UncertainRag:
+        def answer(self, query, top_k=5, system_prompt=None):
+            return {
+                "response": "I don't have that information in my clinic knowledge base.",
+                "chunks": [],
+                "confidence": 0.0,
+                "grounded": False,
+            }
+
+    monkeypatch.setattr(nodes, "_get_rag_agent", lambda: UncertainRag())
+
+    result = nodes.doctor_bio_node({"message": "who is our dermatologist"})
+
+    assert result["data"]["clarification"] is True
+    assert "?" in result["response"]
+
+
+def test_mission_question_falls_back_to_rag_instead_of_contact_faq(monkeypatch):
+    class StubRag:
+        def answer(self, query, top_k=5, system_prompt=None):
+            return {
+                "response": "Nishant Care's mission is to provide compassionate, patient-centered healthcare.",
+                "chunks": [_StubDoc("Mission: compassionate, patient-centered healthcare.", "clinic_info.pdf")],
+            }
+
+    monkeypatch.setattr(nodes, "_get_rag_agent", lambda: StubRag())
+
+    result = nodes.faq_node({"message": "Give me the Mission of Nishant Care"})
+
+    assert result["data"] == {"faq_fallback": "rag"}
+    assert result["chunks"][0]["source"] == "clinic_info.pdf"
+    assert "mission" in result["response"].lower()
+    assert "9866835892" not in result["response"]
+
+
+def test_your_vision_means_nishant_care_and_uses_rag(client, make_user, monkeypatch):
+    rag_calls = []
+
+    class StubRag:
+        def answer(self, query, top_k=5, system_prompt=None):
+            rag_calls.append(query)
+            return {
+                "response": "Nishant Care's vision is to make trusted care accessible.",
+                "chunks": [_StubDoc("Vision: trusted care accessible.", "clinic_info.pdf")],
+            }
+
+    monkeypatch.setattr(nodes, "_get_rag_agent", lambda: StubRag())
+
+    patient = make_user()
+    response = client.post(
+        "/chat",
+        headers=patient["headers"],
+        json={"message": "What is your vision"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["intent"] == "faq"
+    assert body["data"] == {"faq_fallback": "rag"}
+    assert "vision" in body["response"].lower()
+    assert body["chunks"][0]["source"] == "clinic_info.pdf"
+    assert rag_calls == ["What is Nishant Care vision"]
+
+
 def test_faq_node_uses_matched_answer_without_rag(monkeypatch):
     monkeypatch.setattr(
         nodes,
@@ -175,6 +310,50 @@ def test_malformed_faq_file_does_not_raise(tmp_path):
     bad.write_text("{not json")
     store = FAQAgent(faq_path=str(bad))._get_store()
     assert store.search("anything") == []
+
+
+def test_rag_extractive_fallback_uses_retrieved_chunks():
+    agent = RAGAgent.__new__(RAGAgent)
+    docs = [
+        _StubDoc(
+            "Nishant Care mission is to provide compassionate and patient-centered healthcare. "
+            "The clinic is located in Baneshwor.",
+            "clinic_info.pdf",
+        )
+    ]
+
+    response = agent._extractive_answer("Give me the Mission of Nishant Care", docs)
+
+    assert "mission" in response.lower()
+    assert "patient-centered healthcare" in response
+
+
+def test_rag_extractive_fallback_refuses_unsupported_answer():
+    agent = RAGAgent.__new__(RAGAgent)
+    docs = [
+        _StubDoc(
+            "Nishant Care is located in Baneshwor and provides clinic appointments.",
+            "clinic_info.pdf",
+        )
+    ]
+
+    response = agent._extractive_answer("Who is the clinic founder?", docs)
+
+    assert response == "I don't have that information in my clinic knowledge base."
+
+
+def test_rag_extractive_fallback_answers_nishant_care_identity():
+    agent = RAGAgent.__new__(RAGAgent)
+    docs = [
+        _StubDoc(
+            "Nishant Care is a patient-centered healthcare clinic located in Baneshwor, Kathmandu, Nepal.",
+            "clinic_info.pdf",
+        )
+    ]
+
+    response = agent._extractive_answer("What is Nishant Care?", docs)
+
+    assert "patient-centered healthcare clinic" in response
 
 
 def test_faq_answer_ignores_patient_memories(monkeypatch):

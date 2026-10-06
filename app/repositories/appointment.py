@@ -1,9 +1,10 @@
 """Appointment repositories."""
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.appointment import Appointment
+from app.models.user_account import UserAccount
 from app.repositories.patient import get_patient_by_email
 from app.schemas.appointment import AppointmentCreate
 
@@ -31,6 +32,16 @@ def get_appointments_by_doctor(db: Session, doctor_id: int):
     ).all()
 
 
+def get_all_appointments(db: Session):
+    """Clinic-wide tracking list for staff and admins: every appointment,
+    newest date first (mirrors the ordering of :func:`get_appointments_by_email`)."""
+    return (
+        db.query(Appointment)
+        .order_by(Appointment.date.desc(), Appointment.time.desc())
+        .all()
+    )
+
+
 def get_appointment(db: Session, appointment_id: int):
     return db.query(Appointment).filter(Appointment.id == appointment_id).first()
 
@@ -47,6 +58,37 @@ def get_appointments_by_email(db: Session, email: str):
         .order_by(Appointment.date.desc(), Appointment.time.desc())
         .all()
     )
+
+
+def get_appointments_for_user(db: Session, user: UserAccount):
+    """Every appointment the account tracks, newest date first.
+
+    Ownership is account-based: bookings linked to the account's ``patient`` row
+    (chat bookings are linked at write time) are returned regardless of which
+    email was typed during booking. Bookings made with the account's own email
+    are included too so rows from before linking existed stay visible.
+    """
+    patient = get_patient_by_email(db, user.email)
+    condition = func.lower(Appointment.email) == (user.email or "").strip().lower()
+    if patient is not None:
+        condition = or_(Appointment.patient_id == patient.id, condition)
+    return (
+        db.query(Appointment)
+        .filter(condition)
+        .order_by(Appointment.date.desc(), Appointment.time.desc())
+        .all()
+    )
+
+
+def owns_appointment(db: Session, user: UserAccount, appointment: Appointment | None) -> bool:
+    """Account-based ownership: linked to the account's ``patient`` row, or
+    booked with the account's own email (legacy rows predating the link)."""
+    if appointment is None:
+        return False
+    if (appointment.email or "").strip().lower() == (user.email or "").strip().lower():
+        return True
+    patient = get_patient_by_email(db, user.email)
+    return patient is not None and appointment.patient_id == patient.id
 
 
 def update_appointment(db: Session, appointment: Appointment, changes: dict):

@@ -15,8 +15,7 @@ WORKDIR /app
 
 # Only the lockfile + manifest first, so the dependency layer is cached.
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Application code, migrations and the RAG source documents (PDFs).
 # The FAISS index is NOT copied: it is generated on first query from data/
@@ -25,8 +24,7 @@ COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini README.md ./
 COPY data ./data
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev
 
 # ---------------------------------------------------------------- runtime ----
 FROM python:3.13-slim AS runtime

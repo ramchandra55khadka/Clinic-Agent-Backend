@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16
+    container_name: clinic-agent-backend-db
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-clinicdb}"
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - clinic_agent_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-clinicdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: clinic-agent-backend:latest
+    container_name: clinic-agent-backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-clinicdb}"
+      ENVIRONMENT: development
+      CREATE_TABLES_ON_STARTUP: "true"
+      ENABLE_DOCS: "true"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  clinic_agent_postgres_data:

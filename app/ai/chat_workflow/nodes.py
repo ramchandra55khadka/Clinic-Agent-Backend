@@ -7,8 +7,14 @@ from pydantic import ValidationError
 
 from app.ai.agents.faq_agent import FAQAgent
 from app.ai.agents.medical_search_agent import MedicalSearchAgent
-from app.ai.agents.rag_agent import RAGAgent
-from app.ai.chat_workflow.extraction import FIELD_QUESTIONS, extract_booking_fields, missing_fields, parse_date
+from app.ai.agents.rag_agent import RAG_NOT_FOUND_RESPONSE, RAGAgent
+from app.ai.chat_workflow.extraction import (
+    FIELD_QUESTIONS,
+    extract_booking_fields,
+    missing_fields,
+    parse_date,
+    parse_time,
+)
 from app.ai.chat_workflow.state import ClinicChatState
 from app.ai.mcp.mcp_tools import book_appointment, check_slots, explain_slot, list_doctor_availability, list_doctors
 from app.core.config import settings
@@ -28,8 +34,6 @@ def _get_rag_agent() -> RAGAgent:
         _rag_agent = RAGAgent(
             docs_dir=settings.docs_dir,
             persist_dir=settings.persist_dir,
-            llm_model="gemini-2.5-flash",
-            temperature=0.3,
             top_k=5,
         )
     return _rag_agent
@@ -72,6 +76,39 @@ def _reply(text: str, *, next_step: str | None = None) -> str:
     if next_step:
         return f"{text}\n\nNext: {next_step}"
     return text
+
+
+# When the assistant has no grounded answer it asks a clarifying follow-up instead
+# of guessing (a hallucination) or refusing flatly — the way a real front-desk
+# chatbot keeps the conversation moving.
+_CLARIFY_RESPONSE = (
+    "I want to make sure I give you the right information, so I would rather ask "
+    "than guess. Could you tell me a little more about what you need? For example, "
+    "you can ask about our opening hours, location, services, our doctors, or "
+    "booking an appointment."
+)
+_CLARIFY_OPTIONS = ["Opening hours", "Location & contact", "Services", "Our doctors", "Book an appointment"]
+
+
+def _rag_result_is_uncertain(result: dict[str, Any]) -> bool:
+    """True when a RAG answer is ungrounded, empty, or the model's not-found text.
+
+    Only an explicit signal counts: a result that omits ``grounded``/``confidence``
+    (older stubs or other callers) is treated as a normal, answerable response.
+    """
+    if result.get("grounded") is False:
+        return True
+    response = str(result.get("response") or "").strip()
+    return not response or response == RAG_NOT_FOUND_RESPONSE
+
+
+def _clarification_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Turn an ungrounded answer into a follow-up question with suggested topics."""
+    return {
+        "response": _reply(_CLARIFY_RESPONSE),
+        "chunks": serialize_chunks(result.get("chunks", [])),
+        "data": {"clarification": True, "clarification_options": _CLARIFY_OPTIONS},
+    }
 
 
 
@@ -119,41 +156,184 @@ def _looks_like_general_question(text: str) -> bool:
     return text.startswith(("what is", "what are", "who is", "who are", "why", "how"))
 
 
+def _has_any(text: str, terms: tuple[str, ...]) -> bool:
+    return any(term in text for term in terms)
+
+
+def _looks_medical_or_healthcare_topic(text: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    compact = normalized.replace(" ", "")
+    medical_terms = (
+        "medical", "medicine", "health", "healthcare", "symptom", "fever", "cough", "pain",
+        "headache", "diabetes", "pressure", "treatment", "what should i do", "is it normal",
+        "cause", "rash", "infection", "flu", "disease", "science", "hypertension", "blood pressure",
+        "asthma", "allergy", "allergies", "nausea", "vomit", "diarrhea", "injury", "wound",
+        "pregnancy", "heart", "cardiac", "surgery", "surjery", "vaccine", "vaccination", "medication",
+        "drug", "dose", "diagnosis", "therapy", "mental health", "anxiety", "depression",
+        "telemedicine", "telehealth", "biomedicine", "biomedical", "pathology", "radiology",
+        "cardiology", "dermatology", "neurology", "oncology", "orthopedics", "paediatrics",
+        "pediatrics", "gynecology", "gynaecology", "urology", "psychiatry", "dentistry",
+        "physiology", "anatomy", "pharmacology", "immunology", "microbiology", "epidemiology",
+        "public health", "nursing", "physiotherapy", "rehabilitation", "laboratory", "clinical",
+        "operation", "procedure", "transplant", "bypass", "fracture", "stroke", "cancer",
+        "tumor", "tumour", "virus", "bacteria", "antibiotic", "insulin", "cholesterol",
+        "alcohol", "alcoholic", "alchol", "alcholic", "addiction", "addicted", "habit",
+        "quit drinking", "stop drinking", "substance use", "withdrawal", "craving", "sobriety",
+    )
+    compact_terms = ("openheart", "openheartsurgery", "telemedicine", "telehealth")
+    return _has_any(normalized, medical_terms) or any(term in compact for term in compact_terms)
+
+
+def _is_assistant_identity_question(text: str) -> bool:
+    normalized = text.strip().lower().strip("?!., ")
+    return normalized in {
+        "who are you",
+        "what are you",
+        "who r u",
+        "what can you do",
+        "how can you help",
+        "what do you do",
+    }
+
+
+def _looks_like_clinic_knowledge_question(text: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    return _has_any(
+        normalized,
+        (
+            "about nishant",
+            "about the clinic",
+            "mission",
+            "vision",
+            "objective",
+            "purpose",
+            "values",
+            "your mission",
+            "your vision",
+            "your objective",
+            "your purpose",
+            "your values",
+        ),
+    )
+
+
+def _looks_like_booking_request(text: str) -> bool:
+    """True for commands to start booking, not questions about appointments."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    if not normalized:
+        return False
+
+    informational_starts = (
+        "tell me",
+        "what",
+        "how",
+        "can i",
+        "do i",
+        "does",
+        "is",
+        "are",
+        "about",
+        "explain",
+    )
+    if normalized.startswith(informational_starts):
+        return False
+    if normalized.startswith("book ") and ("doctor id" in normalized or "doctor " in normalized):
+        return True
+
+    booking_phrases = (
+        "book appointment",
+        "book an appointment",
+        "book a appointment",
+        "make appointment",
+        "make an appointment",
+        "schedule appointment",
+        "schedule an appointment",
+        "reserve appointment",
+        "reserve an appointment",
+        "i want to book",
+        "i need to book",
+        "i would like to book",
+        "help me book",
+    )
+    return _has_any(normalized, booking_phrases)
+
+
+def _looks_like_doctor_directory_request(text: str) -> bool:
+    """True when the user asks which doctors the clinic has, not day slots."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    if not _has_any(normalized, ("doctor", "doctors")):
+        return False
+    if _has_any(normalized, ("today", "tomorrow", "date", "slot", "slots", "time", "free")) or parse_date(text):
+        return False
+    return _has_any(
+        normalized,
+        (
+            "available in nishant care",
+            "available at nishant care",
+            "doctor available in",
+            "doctor available at",
+            "doctors available in",
+            "doctors available at",
+            "which doctor",
+            "tell me the doctor",
+            "list doctor",
+            "list doctors",
+        ),
+    )
+
+
 def route_intent(state: ClinicChatState) -> dict:
     text = state["message"].lower().strip()
     conversation = state.get("conversation", {})
-    if conversation.get("mode") == "booking" and _looks_like_general_question(text):
-        return {"intent": "medical_web"}
+    if _is_assistant_identity_question(text):
+        return {"intent": "fallback"}
+    if conversation.get("mode") == "booking":
+        if _has_any(text, ("our doctor", "our doctors", "clinic doctor", "clinic doctors", "doctor bio", "doctor profile")):
+            return {"intent": "doctor_bio"}
+        if _looks_like_doctor_directory_request(text):
+            return {"intent": "availability"}
+        if _looks_like_clinic_knowledge_question(text):
+            return {"intent": "faq"}
+        if _looks_medical_or_healthcare_topic(text):
+            return {"intent": "medical_web"}
+        if _looks_like_general_question(text):
+            return {"intent": "out_of_scope"}
+        if _looks_like_booking_request(text):
+            return {"intent": "booking"}
     if conversation.get("mode") == "booking":
         return {"intent": "booking"}
     if state.get("patient"):
         return {"intent": "booking"}
 
     greeting_words = {"hi", "hello", "hey", "namaste", "good morning", "good afternoon", "good evening"}
-    booking_words = ("book", "appointment", "schedule", "visit", "consult", "reserve")
     availability_words = ("available", "availability", "free", "slot", "today", "tomorrow")
-    medical_words = (
-        "medical", "medicine", "health", "healthcare", "symptom", "fever", "cough", "pain",
-        "headache", "diabetes", "pressure", "treatment", "what should i do", "is it normal",
-        "cause", "rash", "infection", "flu", "disease", "science",
-    )
     clinic_doctor_words = (
         "our doctor", "our doctors", "clinic doctor", "clinic doctors", "doctor bio", "doctor profile",
         "doctors", "dr.", "qualification", "specialization", "experience",
     )
+    clinic_faq_words = (
+        "clinic", "hospital", "nishant", "opening hour", "hours", "open", "closed", "location",
+        "address", "payment", "insurance", "card", "cash", "fee", "price", "cost", "service",
+        "services", "report", "lab", "prescription", "bring", "parking", "policy", "cancel",
+        "reschedule",
+    )
 
     if text in greeting_words or text.strip("!. ") in greeting_words:
         return {"intent": "fallback"}
-    if any(word in text for word in booking_words):
+    if _looks_like_booking_request(text):
         return {"intent": "booking"}
-    if any(word in text for word in availability_words):
+    if _has_any(text, availability_words):
         return {"intent": "availability"}
-    if any(word in text for word in clinic_doctor_words):
+    if _has_any(text, clinic_doctor_words):
         return {"intent": "doctor_bio"}
+    if _looks_like_doctor_directory_request(text):
+        return {"intent": "availability"}
+    if _looks_like_clinic_knowledge_question(text):
+        return {"intent": "faq"}
 
     # Symptom/condition words mean the patient wants real medical guidance, so they
     # go to web search even when the phrasing resembles a FAQ entry.
-    if any(word in text for word in medical_words):
+    if _looks_medical_or_healthcare_topic(text):
         return {"intent": "medical_web"}
 
     # The FAQ covers clinic basics (hours, location, payment, services, policy).
@@ -163,13 +343,16 @@ def route_intent(state: ClinicChatState) -> dict:
     if not text.isdigit() and _get_faq_agent()._get_store().search(_resolved_query(state), k=1):
         return {"intent": "faq"}
 
+    if _has_any(text, clinic_faq_words):
+        return {"intent": "faq"}
+
     if _looks_like_general_question(text):
-        return {"intent": "medical_web"}
+        return {"intent": "out_of_scope"}
 
     if text.isdigit():
         return {"intent": "fallback"}
 
-    return {"intent": "medical_web"}
+    return {"intent": "out_of_scope"}
 
 
 def _memory_context(state: ClinicChatState) -> str:
@@ -233,7 +416,7 @@ def _resolved_query(state: ClinicChatState) -> str:
     previous patient turn ("book Dr. Koirala tomorrow") gives the embedder and
     the web search real terms to work with.
     """
-    message = state["message"].strip()
+    message = _rewrite_clinic_possessive(state["message"].strip())
     if not _is_anaphoric(message):
         return message
 
@@ -250,6 +433,22 @@ def _resolved_query(state: ClinicChatState) -> str:
     return f"{previous}\n{message}"
 
 
+def _rewrite_clinic_possessive(message: str) -> str:
+    """Make clinic-facing possessives explicit for retrieval.
+
+    Patients often ask "your vision" meaning "Nishant Care's vision". The
+    assistant identity path still handles standalone "who are you"; clinic
+    knowledge terms should retrieve against the clinic name.
+    """
+    rewritten = re.sub(
+        r"\b(your|our)\s+(mission|vision|objective|purpose|values|services|departments|policy|policies)\b",
+        r"Nishant Care \2",
+        message,
+        flags=re.IGNORECASE,
+    )
+    return rewritten
+
+
 def _is_anaphoric(message: str) -> bool:
     """True when the message leans on pronouns, ellipsis, or is just too short."""
     tokens = re.findall(r"[\w']+", message.lower())
@@ -263,6 +462,8 @@ def _is_anaphoric(message: str) -> bool:
 def doctor_bio_node(state: ClinicChatState) -> dict:
     agent = _get_rag_agent()
     result = agent.answer(query=_resolved_query(state), top_k=5, system_prompt=_system_prompt(state))
+    if _rag_result_is_uncertain(result):
+        return _clarification_result(result)
     return {
         "response": _reply(result["response"]),
         "chunks": serialize_chunks(result.get("chunks", [])),
@@ -279,6 +480,28 @@ def availability_node(state: ClinicChatState) -> dict:
         or parse_date(state["message"])
     )
     appointment_time = state.get("appointment_time") or (conversation.get("booking") or {}).get("time")
+
+    if not appointment_date and not doctor_id and _looks_like_doctor_directory_request(state["message"]):
+        doctors = list_doctors()
+        if not doctors:
+            return {
+                "response": _reply("I could not find any doctors in the clinic database right now."),
+                "data": {"doctors": []},
+                "conversation": conversation,
+            }
+
+        lines = []
+        for doctor in doctors:
+            specialization = f" ({doctor['specialization']})" if doctor.get("specialization") else ""
+            lines.append(f"- Dr. {doctor['doctor_name'].removeprefix('Dr. ').strip()}{specialization}")
+        return {
+            "response": _reply(
+                "Doctors available at Nishant Care:\n" + "\n".join(lines),
+                next_step="Share a date if you want available appointment slots.",
+            ),
+            "data": {"doctors": doctors},
+            "conversation": conversation,
+        }
 
     # Recall a doctor named earlier in this thread so "is he free tomorrow?" works
     # after the patient already picked a doctor on a previous turn.
@@ -393,6 +616,111 @@ def _plain_answer_for_field(text: str, field: str) -> Any | None:
         return lowered.title()
     return None
 
+
+def _invalid_field_feedback(text: str, field: str) -> str | None:
+    cleaned = text.strip()
+    lowered = cleaned.lower()
+    if not cleaned:
+        return None
+
+    if field == "email":
+        return "Please enter a valid email address, for example ram@example.com."
+    if field == "age":
+        return "Please enter a valid age as a number between 0 and 130."
+    if field == "sex":
+        return "Please choose one of these options: Male, Female, or Other."
+    if field == "phone":
+        return "Please enter a valid phone number with at least 7 digits."
+    if field == "date":
+        if re.search(r"\d|today|tomorrow|tommorrow|tommrow|tmrw|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec", lowered):
+            return "Please enter a valid appointment date, for example 2026-10-05, or choose a date from the calendar."
+    if field == "time":
+        if re.search(r"\d|am|pm|morning|afternoon|evening", lowered):
+            return "Please enter a valid appointment time, for example 10:30 AM."
+    if field == "patient_name":
+        if any(char.isdigit() for char in cleaned) or "@" in cleaned or len(cleaned) < 2:
+            return "Please enter a valid patient name using letters, for example Ramchandra Khada."
+    return None
+
+
+def _confirmation_answer(text: str) -> bool | None:
+    cleaned = text.strip().lower()
+    cleaned = re.sub(r"[.!?:,;]+$", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if cleaned in {"yes", "y", "yeah", "yep", "confirm", "confirmed", "correct", "that's right", "that is right"}:
+        return True
+    if cleaned in {"no", "n", "nope", "cancel", "stop", "not now", "do not confirm"}:
+        return False
+    return None
+
+
+def _format_booking_confirmation_question(booking: dict[str, Any]) -> str:
+    date_text = str(booking["date"])
+    time_value = datetime.strptime(str(booking["time"])[:5], "%H:%M").time()
+    time_text = time_value.strftime("%I:%M %p").lstrip("0")
+    patient_name = booking.get("patient_name", "the patient")
+    return f"Do you want to confirm the appointment for {patient_name} on {date_text} at {time_text}?"
+
+
+def _booking_doctor_question() -> str:
+    doctors = list_doctors()
+    names = ", ".join(doctor["doctor_name"] for doctor in doctors[:8])
+    question = "Which doctor would you like to book with? You can type the doctor's name"
+    if names:
+        question += f". Available doctors: {names}"
+    question += "."
+    return question
+
+
+def _booking_past_slot_response(booking: dict[str, Any], conversation: dict[str, Any]) -> dict | None:
+    if not booking.get("date"):
+        return None
+
+    try:
+        slot_date = datetime.strptime(str(booking["date"]), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+    today = datetime.now(settings.clinic_tzinfo).date()
+    if slot_date < today:
+        booking.pop("date", None)
+        booking.pop("time", None)
+        conversation["booking"] = booking
+        conversation["required"] = ["date"]
+        return {
+            "response": _reply(
+                "That date is in the past. Please choose today or a future date.",
+                next_step="Select a date from the calendar or type YYYY-MM-DD.",
+            ),
+            "data": {"booking": booking, "required": ["date"]},
+            "conversation": conversation,
+        }
+
+    if not booking.get("time"):
+        return None
+
+    try:
+        slot_time = datetime.strptime(str(booking["time"])[:5], "%H:%M").time()
+    except ValueError:
+        return None
+
+    slot_moment = datetime.combine(slot_date, slot_time, tzinfo=settings.clinic_tzinfo)
+    if slot_moment <= datetime.now(settings.clinic_tzinfo):
+        booking.pop("time", None)
+        conversation["booking"] = booking
+        conversation["required"] = ["time"]
+        return {
+            "response": _reply(
+                "That time has already passed. Please choose a later slot.",
+                next_step="Pick one of the available times.",
+            ),
+            "data": {"booking": booking, "required": ["time"]},
+            "conversation": conversation,
+        }
+
+    return None
+
+
 def booking_node(state: ClinicChatState) -> dict:
     conversation = state.get("conversation", {"mode": None, "booking": {}})
     booking = conversation.get("booking", {})
@@ -403,6 +731,30 @@ def booking_node(state: ClinicChatState) -> dict:
         plain_value = _plain_answer_for_field(state["message"], expected_field)
         if plain_value is not None:
             booking[expected_field] = plain_value
+        elif expected_field in {"date", "time"}:
+            parsed_value = parse_date(state["message"]) if expected_field == "date" else parse_time(state["message"])
+            if parsed_value is None:
+                feedback = _invalid_field_feedback(state["message"], expected_field)
+                if feedback:
+                    conversation["mode"] = "booking"
+                    conversation["booking"] = booking
+                    conversation["required"] = [expected_field]
+                    return {
+                        "response": _reply(feedback, next_step=FIELD_QUESTIONS[expected_field]),
+                        "data": {"booking": booking, "required": [expected_field]},
+                        "conversation": conversation,
+                    }
+        else:
+            feedback = _invalid_field_feedback(state["message"], expected_field)
+            if feedback:
+                conversation["mode"] = "booking"
+                conversation["booking"] = booking
+                conversation["required"] = [expected_field]
+                return {
+                    "response": _reply(feedback, next_step=FIELD_QUESTIONS[expected_field]),
+                    "data": {"booking": booking, "required": [expected_field]},
+                    "conversation": conversation,
+                }
 
     last_availability = conversation.get("last_availability") or {}
     candidates = last_availability.get("doctors") if isinstance(last_availability, dict) else None
@@ -443,12 +795,35 @@ def booking_node(state: ClinicChatState) -> dict:
 
     missing = missing_fields(booking)
     conversation["required"] = missing[:1]
+
+    past_slot_response = _booking_past_slot_response(booking, conversation)
+    if past_slot_response is not None:
+        return past_slot_response
     
     if "doctor_id" not in missing and "date" not in missing:
-        slots = check_slots(int(booking["doctor_id"]), datetime.strptime(booking["date"], "%Y-%m-%d").date())
-        if not slots:
+        try:
+            slot_date = datetime.strptime(booking["date"], "%Y-%m-%d").date()
+        except ValueError:
+            booking.pop("date", None)
+            conversation["booking"] = booking
+            conversation["required"] = ["date"]
             return {
-                "response": _reply("I could not find a schedule for that doctor.", next_step="Choose another doctor."),
+                "response": _reply(FIELD_QUESTIONS["date"], next_step="For example, 2026-10-05 or tomorrow."),
+                "data": {"booking": booking, "required": ["date"]},
+                "conversation": conversation,
+            }
+
+        slots = check_slots(int(booking["doctor_id"]), slot_date)
+        if not slots:
+            booking.pop("doctor_id", None)
+            booking.pop("doctor_name", None)
+            conversation["booking"] = booking
+            conversation["required"] = ["doctor_id"]
+            return {
+                "response": _reply(
+                    "I could not find a schedule for that doctor.",
+                    next_step=_booking_doctor_question(),
+                ),
                 "data": {"booking": booking, "required": ["doctor_id"]},
                 "conversation": conversation,
             }
@@ -462,17 +837,36 @@ def booking_node(state: ClinicChatState) -> dict:
     if missing:
         next_field = missing[0]
         if next_field == "doctor_id":
-            doctors = list_doctors()
-            names = ", ".join(f"{doctor['doctor_name']} (ID {doctor['doctor_id']})" for doctor in doctors[:8])
-            question = "Which doctor would you like to book with? You can type the doctor's name"
-            if names:
-                question += f". Available doctors: {names}"
-            question += "."
+            question = _booking_doctor_question()
         else:
             question = FIELD_QUESTIONS[next_field]
         return {
             "response": _reply(question),
             "data": {"booking": booking, "required": [next_field], "memories": state.get("long_term_memories", [])},
+            "conversation": conversation,
+        }
+
+    if conversation.get("awaiting_confirmation"):
+        confirmation = _confirmation_answer(state["message"])
+        if confirmation is False:
+            return {
+                "response": _reply("Okay, I have not booked the appointment."),
+                "data": {"booking": booking, "confirmed": False},
+                "conversation": {"mode": None, "booking": {}},
+            }
+        if confirmation is not True:
+            return {
+                "response": _reply(_format_booking_confirmation_question(booking), next_step="Reply yes to confirm or no to cancel."),
+                "data": {"booking": booking, "required": ["confirmation"], "awaiting_confirmation": True},
+                "conversation": conversation,
+            }
+        conversation["awaiting_confirmation"] = False
+    else:
+        conversation["awaiting_confirmation"] = True
+        conversation["required"] = ["confirmation"]
+        return {
+            "response": _reply(_format_booking_confirmation_question(booking), next_step="Reply yes to confirm or no to cancel."),
+            "data": {"booking": booking, "required": ["confirmation"], "awaiting_confirmation": True},
             "conversation": conversation,
         }
 
@@ -497,7 +891,7 @@ def booking_node(state: ClinicChatState) -> dict:
     result = book_appointment(appointment)
     if result["status"] != "success":
         reason = result.get("reason", "unavailable")
-        if reason in {"slot_booked", "during_break", "after_working_hours", "before_working_hours", "doctor_on_leave"}:
+        if reason in {"slot_booked", "during_break", "after_working_hours", "before_working_hours", "doctor_on_leave", "not_working_day"}:
             slots = check_slots(appointment.doctor_id, appointment.date)
             booking.pop("time", None)
             conversation["booking"] = booking
@@ -547,6 +941,8 @@ def faq_node(state: ClinicChatState) -> dict:
     rag_result = _get_rag_agent().answer(
         query=_resolved_query(state), top_k=5, system_prompt=_system_prompt(state)
     )
+    if _rag_result_is_uncertain(rag_result):
+        return _clarification_result(rag_result)
     return {
         "response": _reply(rag_result["response"]),
         "chunks": serialize_chunks(rag_result.get("chunks", [])),
@@ -558,7 +954,26 @@ def medical_web_node(state: ClinicChatState) -> dict:
     return _get_medical_agent().answer(_resolved_query(state), system_prompt=_system_prompt(state))
 
 
+def out_of_scope_node(state: ClinicChatState) -> dict:
+    return {
+        "response": _reply(
+            "I can help with healthcare, clinic information, doctor availability, and appointment booking only.",
+            next_step="Ask a clinic or health-related question.",
+        ),
+        "data": {"scope": "out_of_scope"},
+    }
+
+
 def fallback_node(state: ClinicChatState) -> dict:
+    if _is_assistant_identity_question(state["message"]):
+        return {
+            "response": _reply(
+                "I am the clinic assistant. I can help with doctor information, availability, and appointment booking.",
+                next_step="Ask about a doctor, check availability, or book an appointment.",
+            ),
+            "data": {"assistant_identity": True},
+        }
+
     # A greeting mid-thread is not a dead end: acknowledge it and point back at
     # what the patient was already doing instead of restarting the script.
     if (state.get("history") or []) and state["message"].strip().lower().strip("!. ") in {

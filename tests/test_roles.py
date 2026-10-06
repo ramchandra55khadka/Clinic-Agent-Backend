@@ -13,7 +13,8 @@ from app.db.session import SessionLocal
 from app.models.audit_log import AuditLog
 
 SCHEDULE_PAYLOAD = {
-    "doctor_name": "Dr. Role Check",
+    "first_name": "Role",
+    "last_name": "Check",
     "specialization": "Dermatology",
     "start_time": "09:00:00",
     "end_time": "13:00:00",
@@ -25,6 +26,7 @@ STAFF_ENDPOINTS = [
     ("POST", "/doctor-schedule/"),
     ("PUT", "/doctor-schedule/1"),
     ("DELETE", "/doctor-schedule/1"),
+    ("GET", "/appointments/"),
     ("GET", "/appointments/1"),
 ]
 
@@ -51,6 +53,63 @@ def test_patients_cannot_manage_doctors_or_see_clinic_wide_lists(
     response = client.request(method, path, headers=patient["headers"], json=SCHEDULE_PAYLOAD)
     assert response.status_code == 403, f"{method} {path} returned {response.status_code}"
     assert "staff" in response.json()["detail"].lower()
+
+
+def test_staff_can_track_every_appointment_clinic_wide(client, make_user, doctor):
+    """The admin/front-desk list spans all doctors, not just one."""
+    admin = doctor["admin"]
+    first_doctor_id = doctor["schedule"]["id"]
+
+    second = client.post(
+        "/doctor-schedule/",
+        headers=admin["headers"],
+        json={
+            "first_name": "Clinic",
+            "last_name": "Wide",
+            "specialization": "Pediatrics",
+            "start_time": "09:00:00",
+            "end_time": "13:00:00",
+            "slot_duration": 30,
+        },
+    )
+    assert second.status_code == 200, second.text
+    second_doctor_id = second.json()["id"]
+
+    staff = make_user(role=STAFF)
+    patient = make_user(role=PATIENT)
+
+    def book(doctor_id: int, time: str) -> dict:
+        response = client.post(
+            "/appointments/",
+            headers=patient["headers"],
+            json={
+                "doctor_id": doctor_id,
+                "patient_name": "Track All",
+                "age": 31,
+                "sex": "female",
+                "email": patient["email"],
+                "phone": "9876543210",
+                "date": "2030-01-07",
+                "time": time,
+            },
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    first_booking = book(first_doctor_id, "09:00:00")
+    second_booking = book(second_doctor_id, "10:00:00")
+
+    everything = client.get("/appointments/", headers=staff["headers"])
+    assert everything.status_code == 200, everything.text
+    ids = {row["id"] for row in everything.json()}
+    assert {first_booking["id"], second_booking["id"]} <= ids
+
+    # The per-doctor list still scopes to its own doctor.
+    per_doctor = client.get(f"/appointments/{first_doctor_id}", headers=staff["headers"])
+    assert per_doctor.status_code == 200, per_doctor.text
+    per_doctor_ids = {row["id"] for row in per_doctor.json()}
+    assert first_booking["id"] in per_doctor_ids
+    assert second_booking["id"] not in per_doctor_ids
 
 
 def test_staff_can_create_and_update_a_doctor_schedule(client, make_user):
@@ -482,6 +541,56 @@ def test_staff_can_add_doctor_photo(client, make_user):
 
     assert response.status_code == 200, response.text
     assert response.json()["photo_url"] == payload["photo_url"]
+
+
+def test_staff_can_manage_doctor_education(client, make_user):
+    staff = make_user(role=STAFF)
+    payload = {
+        **SCHEDULE_PAYLOAD,
+        "educations": [
+            {
+                "degree": "MBBS",
+                "institution": "Kathmandu University",
+                "field_of_study": "Medicine",
+                "start_date": "2012-01-01",
+                "end_date": "2017-01-01",
+                "description": "Clinical medicine and surgery.",
+            }
+        ],
+    }
+
+    created = client.post("/doctor-schedule/", headers=staff["headers"], json=payload)
+
+    assert created.status_code == 200, created.text
+    doctor_id = created.json()["id"]
+    assert created.json()["educations"][0]["degree"] == "MBBS"
+
+    updated = client.put(
+        f"/doctor-schedule/{doctor_id}",
+        headers=staff["headers"],
+        json={
+            "educations": [
+                {
+                    "degree": "MD",
+                    "institution": "Tribhuvan University",
+                    "field_of_study": "Internal Medicine",
+                }
+            ]
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["educations"] == [
+        {
+            "id": updated.json()["educations"][0]["id"],
+            "degree": "MD",
+            "institution": "Tribhuvan University",
+            "field_of_study": "Internal Medicine",
+            "start_date": None,
+            "end_date": None,
+            "description": None,
+        }
+    ]
 
 
 def test_doctor_photo_rejects_unsafe_url(client, make_user):

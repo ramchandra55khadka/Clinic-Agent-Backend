@@ -7,9 +7,12 @@ let callers treat the package as a single namespace: ``from app import repositor
 
 from app.repositories.appointment import (
     create_appointment,
+    get_all_appointments,
     get_appointment,
     get_appointments_by_doctor,
     get_appointments_by_email,
+    get_appointments_for_user,
+    owns_appointment,
     update_appointment,
 )
 from app.repositories.audit_log import log_audit
@@ -58,11 +61,13 @@ __all__ = [
     "delete_doctor_schedule",
     "delete_user_account",
     "ensure_patient_for_user",
+    "get_all_appointments",
     "get_all_doctor_schedules",
     "get_all_users",
     "get_appointment",
     "get_appointments_by_doctor",
     "get_appointments_by_email",
+    "get_appointments_for_user",
     "get_doctor",
     "get_doctor_schedule",
     "get_patient_by_email",
@@ -72,6 +77,7 @@ __all__ = [
     "get_user_by_id",
     "is_locked",
     "log_audit",
+    "owns_appointment",
     "register_failed_login",
     "register_successful_login",
     "revoke_refresh_token",

@@ -21,8 +21,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     session_id: str
-    intent: Literal["doctor_bio", "availability", "booking", "faq", "medical_web", "fallback"]
+    intent: Literal["doctor_bio", "availability", "booking", "faq", "medical_web", "fallback", "out_of_scope"]
     response: str
     data: dict[str, Any] = {}
     chunks: list[dict[str, Any]] | None = None
-

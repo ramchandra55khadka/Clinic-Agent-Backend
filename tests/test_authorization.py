@@ -9,6 +9,7 @@ PROTECTED_ENDPOINTS = [
     ("GET", "/doctor-schedule/1"),
     ("POST", "/availability/"),
     ("GET", "/availability/1/2030-01-01"),
+    ("GET", "/appointments/"),
     ("GET", "/appointments/1"),
     ("POST", "/appointments/"),
     ("POST", "/chat"),
@@ -32,6 +33,7 @@ STAFF_ONLY_ENDPOINTS = [
     ("POST", "/doctor-schedule/"),
     ("PUT", "/doctor-schedule/1"),
     ("DELETE", "/doctor-schedule/1"),
+    ("GET", "/appointments/"),
     ("GET", "/appointments/1"),
 ]
 
@@ -62,7 +64,8 @@ def test_admin_can_manage_schedules(client, make_user):
         "/doctor-schedule/",
         headers=admin["headers"],
         json={
-            "doctor_name": "Dr. Admin Owned",
+            "first_name": "Admin",
+            "last_name": "Owned",
             "start_time": "08:00:00",
             "end_time": "12:00:00",
             "slot_duration": 15,

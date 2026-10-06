@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from langchain_core.documents import Document
@@ -6,8 +7,64 @@ from loguru import logger
 
 from app.ai.knowledge_core.rag_setup import RAGPipeline
 from app.ai.knowledge_core.retrieval.retriever import Retriever
-from app.ai.llm_client import LLMClient
+from app.ai.llm_client import LLMClient, normalize_llm_text
 from app.ai.prompts.rag_agent_prompt import RAG_HUMAN_PROMPT, RAG_SYSTEM_PROMPT
+
+#: Exact reply used when the retrieved context holds no answer. The chat workflow
+#: turns this (and any ungrounded retrieval) into a clarifying follow-up question
+#: so the assistant asks the patient instead of guessing.
+RAG_NOT_FOUND_RESPONSE = "I don't have that information in my clinic knowledge base."
+_NOT_FOUND = RAG_NOT_FOUND_RESPONSE
+
+#: Below this evidence score the retrieved text is the nearest chunk, not real
+#: support for the question.
+EVIDENCE_FLOOR = 0.12
+
+_STOPWORDS = {
+    "about",
+    "are",
+    "can",
+    "care",
+    "clinic",
+    "does",
+    "for",
+    "from",
+    "give",
+    "have",
+    "how",
+    "is",
+    "me",
+    "nishant",
+    "of",
+    "on",
+    "please",
+    "should",
+    "tell",
+    "the",
+    "this",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with",
+    "you",
+    "your",
+}
+
+_SYNONYMS = {
+    "address": {"location", "located"},
+    "appointment": {"booking", "book", "schedule"},
+    "book": {"appointment", "booking", "schedule"},
+    "contact": {"phone", "email", "number"},
+    "doctor": {"specialist"},
+    "fee": {"payment", "charge", "cost", "price"},
+    "hours": {"open", "opening", "reception"},
+    "location": {"address", "located"},
+    "medicine": {"medication", "prescribe", "prescription"},
+    "open": {"hours", "opening", "reception"},
+    "payment": {"fee", "charge", "cost", "price"},
+    "services": {"departments", "diagnostic", "consultation"},
+}
 
 
 class RAGAgent:
@@ -19,8 +76,8 @@ class RAGAgent:
         self,
         docs_dir: str,
         persist_dir: str = "vector_db/faiss",
-        llm_model: str = "gemini-2.5-flash",
-        temperature: float = 0.2,
+        llm_model: str | None = None,
+        temperature: float | None = None,
         top_k: int = 5,
     ):
         logger.info("Initializing RAG Agent (lazy mode)...")
@@ -69,7 +126,9 @@ class RAGAgent:
         for doc in docs:
             parts.append(
                 f"Source: {doc.metadata.get('source', 'unknown')}\n"
+                f"Page: {doc.metadata.get('page', 'NA')}\n"
                 f"Chunk ID: {doc.metadata.get('chunk_id', 'NA')}\n\n"
+                f"Relevance: {doc.metadata.get('relevance_score', 'NA')}\n\n"
                 f"{doc.page_content}\n"
                 "------------------------------"
             )
@@ -86,6 +145,70 @@ class RAGAgent:
             converted.append({"role": role, "content": msg.content})
         return converted
 
+    def _query_terms(self, query: str) -> set[str]:
+        terms = {
+            token
+            for token in re.findall(r"[a-z0-9]+", query.lower())
+            if len(token) > 2 and token not in _STOPWORDS
+        }
+        if not terms and "nishant care" in query.lower():
+            terms = {"healthcare", "services", "located"}
+        expanded = set(terms)
+        for term in terms:
+            expanded.update(_SYNONYMS.get(term, set()))
+        return expanded
+
+    def _evidence_score(self, query: str, docs: list[Document]) -> float:
+        query_terms = self._query_terms(query)
+        if not query_terms or not docs:
+            return 0.0
+
+        best = 0.0
+        for doc in docs:
+            content_terms = set(re.findall(r"[a-z0-9]+", doc.page_content.lower()))
+            overlap = len(query_terms & content_terms) / max(len(query_terms), 1)
+            retriever_score = float(doc.metadata.get("relevance_score") or 0.0)
+            best = max(best, overlap, retriever_score)
+        return best
+
+    def _has_relevant_evidence(self, query: str, docs: list[Document]) -> bool:
+        # Below the floor the retrieved text is likely just the nearest available
+        # chunk, not actual evidence for the question.
+        return self._evidence_score(query, docs) >= EVIDENCE_FLOOR
+
+    def _extractive_answer(self, query: str, docs: list[Document]) -> str:
+        """Best-effort clinic answer when the LLM is unavailable."""
+        if not docs:
+            return _NOT_FOUND
+
+        query_terms = self._query_terms(query)
+        if query_terms and not self._has_relevant_evidence(query, docs):
+            return _NOT_FOUND
+
+        sentences: list[tuple[int, str]] = []
+        for doc in docs:
+            text = doc.page_content.strip()
+            lines = [line.strip(" ·\t") for line in text.splitlines() if line.strip(" ·\t")]
+            candidates = lines + re.split(r"(?<=[.!?])\s+", text)
+            for sentence in candidates:
+                clean = " ".join(sentence.split())
+                if not clean:
+                    continue
+                sentence_terms = set(re.findall(r"[a-z0-9]+", clean.lower()))
+                score = len(query_terms & sentence_terms)
+                if clean.endswith(":") or clean.istitle():
+                    score += 1 if query_terms & sentence_terms else 0
+                sentences.append((score, clean))
+
+        scored = sorted(sentences, key=lambda item: item[0], reverse=True)
+        selected = [sentence for score, sentence in scored if score > 0][:3]
+        if not selected:
+            selected = [doc.page_content.strip().replace("\n", " ") for doc in docs[:2] if doc.page_content.strip()]
+
+        if not selected:
+            return _NOT_FOUND
+        return " ".join(selected[:3])
+
     # --------------------------------------------------------------------
     def answer(
         self,
@@ -97,10 +220,34 @@ class RAGAgent:
         top_k = top_k or self.top_k
         logger.info(f"Processing query: {query}")
 
-        # 1️⃣ Retrieve chunks
-        docs = self.retriever.retrieve(query, top_k=top_k)
+        # 1. Retrieve chunks
+        try:
+            docs = self.retriever.retrieve(query, top_k=top_k)
+        except Exception as exc:
+            logger.error(f"RAG retrieval failed: {exc}")
+            return {
+                "response": _NOT_FOUND,
+                "chunks": [],
+                "confidence": 0.0,
+                "grounded": False,
+            }
+        if not docs:
+            return {
+                "response": _NOT_FOUND,
+                "chunks": [],
+                "confidence": 0.0,
+                "grounded": False,
+            }
+        confidence = self._evidence_score(query, docs)
+        if not self._has_relevant_evidence(query, docs):
+            return {
+                "response": _NOT_FOUND,
+                "chunks": docs,
+                "confidence": confidence,
+                "grounded": False,
+            }
 
-        # 2️⃣ Format context
+        # 2. Format context
         context_text = self._format_context(docs)
 
         # 3️⃣ Format messages using prompt template
@@ -114,17 +261,21 @@ class RAGAgent:
 
         # Optional: override system prompt
         if system_prompt:
-            messages_dicts[0]["content"] = system_prompt
+            messages_dicts[0]["content"] = f"{system_prompt.strip()}\n\n{RAG_SYSTEM_PROMPT}"
 
         # 5️⃣ Call LLM
         try:
             llm_response = self.llm.invoke(messages_dicts)  # list of dicts, not objects
-            response_text = getattr(llm_response, "content", str(llm_response)).strip()
+            response_text = normalize_llm_text(llm_response).strip()
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
-            response_text = "I encountered an error generating the response.LLM invocation Failed"
+            response_text = self._extractive_answer(query, docs)
+        if not response_text:
+            response_text = self._extractive_answer(query, docs)
 
         return {
             "response": response_text,
-            "chunks": docs
+            "chunks": docs,
+            "confidence": confidence,
+            "grounded": True,
         }

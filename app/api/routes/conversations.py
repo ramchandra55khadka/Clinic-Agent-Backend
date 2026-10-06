@@ -19,6 +19,7 @@ from app.schemas.conversations import (
     ConversationListResponse,
     ConversationMessageOut,
     ConversationOut,
+    ConversationUpdate,
 )
 from app.services import memory as memory_service
 
@@ -82,6 +83,26 @@ def get_my_conversation(
         messages=[ConversationMessageOut.model_validate(message) for message in page],
         has_more=has_more,
     )
+
+
+@router.patch("/{session_id}", response_model=ConversationOut)
+def rename_my_conversation(
+    session_id: str,
+    payload: ConversationUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserAccount = Depends(get_current_user),
+):
+    """Rename a thread's sidebar title (the ChatGPT-style pencil action).
+
+    Scoped to the caller: someone else's ``session_id`` is a 404, exactly like
+    replay and delete, so a rename cannot even confirm a thread exists.
+    """
+    conversation = memory_service.rename_conversation(
+        db, session_id=session_id, user_id=current_user.id, title=payload.title
+    )
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    return _to_out(conversation)
 
 
 @router.delete("/{session_id}", response_model=MessageResponse)

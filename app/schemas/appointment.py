@@ -28,8 +28,9 @@ class AppointmentOut(AppointmentCreate):
 
 
 class AppointmentUpdate(BaseModel):
-    """Self-service edit of an appointment. The email is the ownership anchor and
-    therefore cannot be changed here."""
+    """Self-service edit of an appointment. The email is an immutable
+    per-appointment snapshot (confirmation emails go there) and cannot be
+    changed here; ownership resolves through the account's patient link."""
 
     patient_name: str | None = Field(default=None, min_length=2)
     age: int | None = Field(default=None, ge=0, le=130)

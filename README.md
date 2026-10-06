@@ -211,6 +211,7 @@ safe.
 | `GET` | `/appointments/me/{id}` | authenticated — 404 unless the booking is the caller's |
 | `PUT` | `/appointments/me/{id}` | authenticated — edit details or reschedule (re-checks the slot) |
 | `POST` | `/appointments/me/{id}/cancel` | authenticated — cancels and frees the slot |
+| `GET` | `/appointments/` | staff or admin — every appointment, clinic-wide |
 | `GET` | `/appointments/{doctor_id}` | staff or admin |
 | `POST` | `/availability/` | authenticated |
 | `GET` | `/availability/{doctor_id}/{date}` | authenticated |

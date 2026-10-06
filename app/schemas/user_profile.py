@@ -50,7 +50,7 @@ class UserProfileUpdate(BaseModel):
     date_of_birth: date | None = None
     gender: Gender | None = None
     address: str | None = Field(default=None, max_length=500)
-    photo_url: str | None = Field(default=None, max_length=200_000)
+    photo_url: str | None = Field(default=None, max_length=8_000_000)
     memory_enabled: bool | None = None
 
     @field_validator("gender")

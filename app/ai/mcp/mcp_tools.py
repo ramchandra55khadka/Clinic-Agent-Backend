@@ -74,7 +74,15 @@ def list_doctor_availability(appointment_date: Date) -> list[dict[str, Any]]:
                     "available": bool(available_slots),
                     "available_slots": available_slots,
                     "slot_count": len(available_slots),
-                    "reason": "doctor_on_leave" if schedule.leave_date == appointment_date else None,
+                    "reason": (
+                        "doctor_on_leave"
+                        if schedule.leave_date == appointment_date
+                        else (
+                            "not_working_day"
+                            if appointment_date.strftime("%A") not in schedule.days
+                            else None
+                        )
+                    ),
                 }
             )
         return result

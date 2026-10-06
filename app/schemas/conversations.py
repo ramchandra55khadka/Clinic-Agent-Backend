@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ConversationOut(BaseModel):
@@ -16,6 +16,21 @@ class ConversationOut(BaseModel):
 
 class ConversationListResponse(BaseModel):
     conversations: list[ConversationOut]
+
+
+
+class ConversationUpdate(BaseModel):
+    """Rename request for a thread (``PATCH /conversations/{session_id}``)."""
+
+    title: str = Field(min_length=1, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def _title_must_not_be_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("title must not be blank")
+        return cleaned
 
 
 

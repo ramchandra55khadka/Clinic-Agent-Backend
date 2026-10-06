@@ -6,7 +6,7 @@ from pydantic import BaseModel
 def valid_image_value(value: str | None) -> str | None:
     if value in (None, ""):
         return None
-    if len(value) > 200_000:
+    if len(value) > 8_000_000:
         raise ValueError("image is too large")
     if value.startswith("https://") or value.startswith("data:image/"):
         return value

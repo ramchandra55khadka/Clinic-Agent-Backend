@@ -105,7 +105,8 @@ def doctor(client, make_user):
         "/doctor-schedule/",
         headers=admin["headers"],
         json={
-            "doctor_name": "Dr. Test Sharma",
+            "first_name": "Test",
+            "last_name": "Sharma",
             "specialization": "General Medicine",
             "start_time": "09:00:00",
             "end_time": "17:00:00",

@@ -239,9 +239,64 @@ def test_user_can_delete_a_conversation(client, make_user, monkeypatch):
     assert client.get("/api/conversations/", headers=user["headers"]).json()["conversations"] == []
 
 
+def test_user_can_rename_a_conversation(client, make_user):
+    user = make_user()
+
+    session_id = "rename-me"
+    with SessionLocal() as db:
+        memory_service.save_message(
+            db, session_id=session_id, user_id=user["user"]["id"], role="user", content="hello"
+        )
+
+    renamed = client.patch(
+        f"/api/conversations/{session_id}",
+        json={"title": "  Skin consult with Dr. Koirala  "},
+        headers=user["headers"],
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["title"] == "Skin consult with Dr. Koirala"
+
+    listed = client.get("/api/conversations/", headers=user["headers"])
+    assert listed.json()["conversations"][0]["title"] == "Skin consult with Dr. Koirala"
+
+
+def test_rename_is_user_scoped_and_validated(client, make_user):
+    owner = make_user()
+    intruder = make_user()
+
+    session_id = "scoped-rename"
+    with SessionLocal() as db:
+        memory_service.save_message(
+            db, session_id=session_id, user_id=owner["user"]["id"], role="user", content="private"
+        )
+
+    # Someone else's thread cannot be renamed (or even confirmed to exist).
+    stolen = client.patch(
+        f"/api/conversations/{session_id}", json={"title": "hijacked"}, headers=intruder["headers"]
+    )
+    assert stolen.status_code == 404
+
+    # Blank and missing titles are rejected by the request schema.
+    blank = client.patch(
+        f"/api/conversations/{session_id}", json={"title": "   "}, headers=owner["headers"]
+    )
+    assert blank.status_code == 422
+    missing = client.patch(f"/api/conversations/{session_id}", json={}, headers=owner["headers"])
+    assert missing.status_code == 422
+
+    # The owner's title survived the failed attempts.
+    detail = client.get(f"/api/conversations/{session_id}", headers=owner["headers"])
+    assert detail.json()["title"] != "hijacked"
+
+    # An unknown thread is a 404 even for an authenticated caller.
+    unknown = client.patch("/api/conversations/nope", json={"title": "x"}, headers=owner["headers"])
+    assert unknown.status_code == 404
+
+
 def test_conversation_endpoints_require_authentication(client):
     assert client.get("/api/conversations/").status_code == 401
     assert client.get("/api/conversations/anything").status_code == 401
+    assert client.patch("/api/conversations/anything", json={"title": "x"}).status_code == 401
     assert client.delete("/api/conversations/anything").status_code == 401
 
 

@@ -8,13 +8,14 @@ otherwise, the agent builds a concise answer from retrieved snippets.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import urlparse
 
 from ddgs import DDGS
 from loguru import logger
 
-from app.ai.llm_client import LLMClient
+from app.ai.llm_client import LLMClient, normalize_llm_text
 from app.ai.prompts.medical_search_agent_prompt import MEDICAL_SEARCH_SYSTEM_PROMPT
 from app.core.config import settings
 
@@ -27,6 +28,14 @@ TRUSTED_DOMAINS = {
     "wikipedia.org",
 }
 TRUSTED_MEDICAL_SITES = " OR ".join(f"site:{domain}" for domain in sorted(TRUSTED_DOMAINS))
+SOURCE_PRIORITY = {
+    "medlineplus.gov": 0,
+    "mayoclinic.org": 1,
+    "nhs.uk": 2,
+    "cdc.gov": 3,
+    "who.int": 4,
+    "wikipedia.org": 5,
+}
 
 
 class MedicalSearchAgent:
@@ -37,7 +46,7 @@ class MedicalSearchAgent:
         if not settings.google_api_key:
             return None
         if self._llm is None:
-            self._llm = LLMClient(model="gemini-2.5-flash", temperature=0.2)
+            self._llm = LLMClient()
         return self._llm
 
     def _is_trusted_medical_source(self, url: str) -> bool:
@@ -68,21 +77,91 @@ class MedicalSearchAgent:
             logger.error("DuckDuckGo returned no trusted medical results for query: {}", query)
         return results
 
+    def _source_priority(self, link: str) -> int:
+        hostname = (urlparse(link).hostname or "").removeprefix("www.")
+        for domain, priority in SOURCE_PRIORITY.items():
+            if hostname == domain or hostname.endswith(f".{domain}"):
+                return priority
+        return len(SOURCE_PRIORITY)
+
+    def _clean_snippet(self, snippet: str) -> str:
+        text = re.sub(r"\[[^\]]*\]", "", snippet)
+        text = re.sub(r"\s+", " ", text).strip(" .")
+        text = re.sub(r"\s+([,.;:])", r"\1", text)
+        return text
+
+    def _snippet_sentences(self, snippet: str) -> list[str]:
+        cleaned = self._clean_snippet(snippet)
+        if not cleaned:
+            return []
+        return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", cleaned) if sentence.strip()]
+
+    def _definition_sentences(self, query: str, results: list[dict[str, str]]) -> list[str]:
+        query_terms = {term for term in re.findall(r"[a-zA-Z]{4,}", query.lower()) if term not in {"what", "medical"}}
+        definition_patterns = (
+            " is ",
+            " are ",
+            " refers to ",
+            " means ",
+            " studies ",
+            " involves ",
+            " includes ",
+        )
+        noisy_phrases = ("cell culture vials", "university of", "research complex")
+
+        candidates: list[tuple[int, int, str]] = []
+        for source_index, item in enumerate(sorted(results, key=lambda result: self._source_priority(result["link"]))):
+            for sentence in self._snippet_sentences(item.get("snippet", "")):
+                sentence_lower = sentence.lower()
+                if any(phrase in sentence_lower for phrase in noisy_phrases):
+                    continue
+                has_query_term = not query_terms or any(term in sentence_lower for term in query_terms)
+                has_definition = any(pattern in sentence_lower for pattern in definition_patterns)
+                if not has_query_term and not has_definition:
+                    continue
+                score = 0
+                if has_query_term:
+                    score -= 2
+                if has_definition:
+                    score -= 2
+                if len(sentence) > 220:
+                    score += 2
+                candidates.append((score, source_index, sentence))
+
+        selected: list[str] = []
+        seen: set[str] = set()
+        for _score, _source_index, sentence in sorted(candidates):
+            key = sentence.lower()
+            if key in seen:
+                continue
+            selected.append(sentence.rstrip(".") + ".")
+            seen.add(key)
+            if len(selected) >= 3:
+                break
+        return selected
 
     def _source_answer(self, query: str, results: list[dict[str, str]]) -> str:
-        snippets = [item.get("snippet", "").strip() for item in results if item.get("snippet", "").strip()]
-        if not snippets:
+        sentences = self._definition_sentences(query, results)
+        if not sentences:
+            sentences = [
+                sentence.rstrip(".") + "."
+                for item in sorted(results, key=lambda result: self._source_priority(result["link"]))
+                for sentence in self._snippet_sentences(item.get("snippet", ""))
+                if sentence
+            ][:2]
+        if not sentences:
             return "I found relevant medical sources, but they did not include enough preview text to answer clearly."
 
-        answer = " ".join(snippets[:3])
-        answer = " ".join(answer.split())
-        if len(answer) > 650:
-            answer = answer[:650].rsplit(" ", 1)[0] + "."
+        answer = " ".join(sentences)
+        if len(answer) > 700:
+            answer = answer[:700].rsplit(" ", 1)[0].rstrip(" .") + "."
+
+        source_titles = [item["title"].strip() for item in results[:2] if item.get("title", "").strip()]
+        if source_titles:
+            answer = f"{answer}\n\nSources checked: {', '.join(source_titles)}."
 
         lowered = query.lower()
-        if lowered.startswith("who is"):
-            return answer
-        if lowered.startswith(("what is", "what are")):
+        if lowered.startswith(("who is", "what is", "what are")):
             return answer
         return answer + " This is general educational information, not a diagnosis or treatment plan."
 
@@ -116,9 +195,9 @@ class MedicalSearchAgent:
                 else prompt
             )
             try:
-                response = llm.invoke(messages)
+                response = normalize_llm_text(llm.invoke(messages))
             except Exception as exc:  # pragma: no cover - provider/quota dependent
                 logger.error("Medical web summarization failed: {} ({})", type(exc).__name__, exc)
                 response = self._source_answer(query, results)
 
-        return {"response": response.strip(), "data": {"sources": results, "provider": "duckduckgo", "search_available": True}}
+        return {"response": normalize_llm_text(response).strip(), "data": {"sources": results, "provider": "duckduckgo", "search_available": True}}

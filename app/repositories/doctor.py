@@ -2,7 +2,9 @@
 
 from sqlalchemy.orm import Session
 
+from app.core.days import days_to_column
 from app.models.doctor import Doctor
+from app.models.doctor_education import DoctorEducation
 from app.models.doctor_schedule import DoctorSchedule
 from app.models.user_profile import UserProfile
 from app.schemas.doctor import DoctorScheduleCreate, DoctorScheduleUpdate
@@ -12,7 +14,16 @@ def create_doctor_schedule(db: Session, schedule: DoctorScheduleCreate):
     """Creates the normalized doctor (a ``user_profile`` + ``doctor``) and its hours."""
     data = schedule.model_dump()
 
-    profile = UserProfile(full_name=data["doctor_name"], photo_url=data.get("photo_url"))
+    profile = UserProfile(
+        first_name=data.get("first_name", ""),
+        last_name=data.get("last_name"),
+        email=data.get("email"),
+        phone=data.get("phone"),
+        date_of_birth=data.get("date_of_birth"),
+        gender=data.get("gender"),
+        address=data.get("address"),
+        photo_url=data.get("photo_url"),
+    )
     doctor = Doctor(
         profile=profile,
         specialization=data.get("specialization"),
@@ -26,6 +37,8 @@ def create_doctor_schedule(db: Session, schedule: DoctorScheduleCreate):
     )
     db.add(doctor)
     db.flush()
+    for education in data.get("educations", []):
+        db.add(DoctorEducation(doctor_id=doctor.id, **education))
 
     db_schedule = DoctorSchedule(
         doctor_id=doctor.id,
@@ -35,6 +48,7 @@ def create_doctor_schedule(db: Session, schedule: DoctorScheduleCreate):
         break_end=data.get("break_end"),
         leave_date=data.get("leave_date"),
         slot_duration=data.get("slot_duration") or doctor.consultation_duration or 30,
+        working_days=days_to_column(data.get("days")),
     )
     db.add(db_schedule)
     db.commit()
@@ -68,6 +82,25 @@ _DOCTOR_FIELDS = {
     "consultation_duration",
     "is_verified",
 }
+#: Fields that live on the ``user_profile`` row.
+_PROFILE_FIELDS = {
+    "first_name",
+    "last_name",
+    "email",
+    "phone",
+    "date_of_birth",
+    "gender",
+    "address",
+    "photo_url",
+}
+
+
+def _replace_doctor_educations(db: Session, doctor: Doctor, educations: list[dict]):
+    for education in list(doctor.educations):
+        db.delete(education)
+    db.flush()
+    for education in educations:
+        db.add(DoctorEducation(doctor_id=doctor.id, **education))
 
 
 def update_doctor_schedule(db: Session, doctor_id: int, schedule: DoctorScheduleUpdate):
@@ -76,12 +109,14 @@ def update_doctor_schedule(db: Session, doctor_id: int, schedule: DoctorSchedule
         return None
 
     for key, value in schedule.model_dump(exclude_unset=True).items():
-        if key in _SCHEDULE_FIELDS:
+        if key == "days":
+            db_schedule.working_days = days_to_column(value)
+        elif key in _SCHEDULE_FIELDS:
             setattr(db_schedule, key, value)
-        elif key == "doctor_name" and db_schedule.doctor.profile is not None:
-            db_schedule.doctor.profile.full_name = value
-        elif key == "photo_url" and db_schedule.doctor.profile is not None:
-            db_schedule.doctor.profile.photo_url = value
+        elif key == "educations" and db_schedule.doctor is not None:
+            _replace_doctor_educations(db, db_schedule.doctor, value or [])
+        elif key in _PROFILE_FIELDS and db_schedule.doctor.profile is not None:
+            setattr(db_schedule.doctor.profile, key, value)
         elif key in _DOCTOR_FIELDS and db_schedule.doctor is not None:
             setattr(db_schedule.doctor, key, value)
 

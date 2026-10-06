@@ -1,10 +1,19 @@
 import os
+from functools import lru_cache
 from pathlib import Path
 
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from loguru import logger
+
+from app.core.config import settings
+
+
+@lru_cache(maxsize=2)
+def _embedding_model(model_name: str) -> FastEmbedEmbeddings:
+    logger.info(f"Loading embedding model: {model_name}")
+    return FastEmbedEmbeddings(model_name=model_name)
 
 
 class EmbeddingsStore:
@@ -18,11 +27,9 @@ class EmbeddingsStore:
     - Saves index to disk
     """
 
-    def __init__(self, persist_directory: str = "vector_db/faiss"):
+    def __init__(self, persist_directory: str = "vector_db/faiss", model_name: str | None = None):
         self.persist_directory = persist_directory
-        self.embeddings = FastEmbedEmbeddings(
-            model_name="BAAI/bge-small-en-v1.5"
-        )
+        self.embeddings = _embedding_model(model_name or settings.embedding_model)
         self.db: FAISS | None = None
 
     def build_or_load(self, documents: list[Document] | None = None) -> FAISS:
@@ -82,4 +89,5 @@ class EmbeddingsStore:
         """
         if not self.db:
             raise ValueError("FAISS index not loaded or built yet")
-        return self.db.similarity_search(text, k=k)
+        query = f"{settings.embedding_query_prefix}{text}" if settings.embedding_query_prefix else text
+        return self.db.similarity_search(query, k=k)
