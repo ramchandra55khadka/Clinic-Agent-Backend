@@ -1,15 +1,3 @@
-"""Booked visits.
-
-An appointment links to a :class:`Doctor` and (best effort) to a :class:`Patient`.
-The patient contact columns are kept as an immutable per-appointment snapshot:
-they are what confirmation emails are sent to and they preserve history if the
-profile later changes. Tracking and self-service ownership resolve through the
-``patient`` link first (the account behind the booking) with the snapshot email
-as the fallback for rows booked before that link existed. The unique constraint
-on ``(doctor_id, date, time)`` is the last line of defence against a
-double-booking when two requests race past the availability pre-check.
-"""
-
 from sqlalchemy import (
     Column,
     Date,

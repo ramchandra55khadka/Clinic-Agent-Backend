@@ -1,19 +1,3 @@
-"""Personal profile shared by patients, doctors and staff.
-
-A profile belongs to at most one login account (``user_id`` is unique) but may
-also stand alone — for example a doctor record entered by clinic staff who does
-not sign in.
-
-``email`` is a **copy** of the owning account's address, kept so a profile can be
-resolved without traversing an ORM relationship; ``user_account`` remains the
-source of truth for credentials. Standalone profiles (doctors) have no account,
-so ``email`` is nullable.
-
-Personal names are stored split into ``first_name``/``last_name``. Callers that
-think in a single display string (doctor schedules, the MCP tool layer) can keep
-using :attr:`UserProfile.full_name`, which composes the columns on read and
-splits them on write — see :func:`split_display_name`.
-"""
 
 from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, func
 
